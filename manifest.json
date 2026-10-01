@@ -1,0 +1,83 @@
+{
+ "title": "2026年度 全体図V2",
+ "files": [
+  {
+   "name": "15A 雑用水管-1.STP",
+   "path": "models/m01.txt",
+   "size": 1464976,
+   "lastModified": 1790811517461
+  },
+  {
+   "name": "15A 雑用水管-2.STP",
+   "path": "models/m02.txt",
+   "size": 1564535,
+   "lastModified": 1790811517345
+  },
+  {
+   "name": "2026年度　全体図V2.STP",
+   "path": "models/m03.txt",
+   "size": 5624519,
+   "lastModified": 1790811519989
+  },
+  {
+   "name": "2026年度　雑用水管　アセンブリ.STP",
+   "path": "models/m04.txt",
+   "size": 3739519,
+   "lastModified": 1790811517941
+  },
+  {
+   "name": "25A-雑用水管-5-1.STP",
+   "path": "models/m05.txt",
+   "size": 1812036,
+   "lastModified": 1790811519085
+  },
+  {
+   "name": "25A-雑用水管-5-2.STP",
+   "path": "models/m06.txt",
+   "size": 2137579,
+   "lastModified": 1790811519769
+  },
+  {
+   "name": "25A-雑用水管-6.STP",
+   "path": "models/m07.txt",
+   "size": 2142077,
+   "lastModified": 1790811520981
+  },
+  {
+   "name": "40A-雑用水管-3.STP",
+   "path": "models/m08.txt",
+   "size": 306410,
+   "lastModified": 1790811521177
+  },
+  {
+   "name": "40A-雑用水管-4.STP",
+   "path": "models/m09.txt",
+   "size": 316726,
+   "lastModified": 1790811522101
+  },
+  {
+   "name": "40A-雑用水管-5.STP",
+   "path": "models/m10.txt",
+   "size": 333923,
+   "lastModified": 1790811522405
+  },
+  {
+   "name": "40A-雑用水管-6.STP",
+   "path": "models/m11.txt",
+   "size": 456314,
+   "lastModified": 1790811522869
+  },
+  {
+   "name": "40A　薬液供給管　3-3.STP",
+   "path": "models/m12.txt",
+   "size": 2153031,
+   "lastModified": 1790811521301
+  },
+  {
+   "name": "80A-汚水供給管.STP",
+   "path": "models/m13.txt",
+   "size": 4143858,
+   "lastModified": 1790811525801
+  }
+ ]
+}
