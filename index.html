@@ -1005,7 +1005,7 @@
       <button id="emptyStateOpenBtn" class="btn btn-accent">STEPファイルを開く</button>
       <button id="emptyStateFolderBtn" class="btn btn-accent" style="margin-top:8px">フォルダを開く</button>
       <p class="empty-state-hint">この画面にファイルやフォルダをドラッグ&amp;ドロップしても読み込めます。</p>
-      <p class="empty-state-hint">サブアセンブリのSTEPも使うときは、親アセンブリと一緒に1つのフォルダへ入れて「フォルダを開く」を選んでください。iPadではフォルダを直接選べないため、「ファイル」アプリでフォルダを長押し→「圧縮」で作ったZIPファイルを「フォルダを開く」で選んでください(フォルダ内のSTEPを複数まとめて選んでも読み込めます)。</p>
+      <p class="empty-state-hint">サブアセンブリのSTEPも使うときは、親アセンブリと一緒に1つのフォルダへ入れて「フォルダを開く」を選んでください。iPadでも「フォルダを開く」でフォルダを選べます(フォルダをタップして中に入り、右上の「開く」を押します。iPadOS 18.4以降)。古いiPadOSでは、「ファイル」アプリでフォルダを長押し→「圧縮」で作ったZIPを選んでください。</p>
     </div>
   </div>
 
@@ -1042,8 +1042,6 @@
         <button id="folderOpenBtn" class="btn btn-install" title="親アセンブリとサブアセンブリのSTEPを入れたフォルダを開く">フォルダを開く</button>
         <button id="folderReportBtn" class="btn btn-ghost-label" hidden>読み込み結果</button>
         <button id="installBtn" class="btn btn-install" hidden>アプリをインストール</button>
-        <!-- v439: 共有ページのURLをコピー(誰でも開けるURLを人に渡すため) -->
-        <button id="shareUrlBtn" class="btn btn-install" title="このビューアの共有URLをコピーします">URLをコピー</button>
         <button id="infoBtn" class="btn btn-ghost" aria-label="このビューアについて" title="このビューアについて">?</button>
         <button id="fitBtn" class="btn btn-accent">全体表示に戻す</button>
       </div>
@@ -1135,7 +1133,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v440</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v444</div>
   <!-- v338: 寸法値の位置決めロジック(render()内)が実際に毎フレーム
        計算している値を、画面上でそのまま確認できる簡易デバッグ表示。
        選択中のPMIが寸法のときだけ表示される。開発者ツールを開かなくても
@@ -16154,19 +16152,53 @@ pmi._lineFarPoint = null;
     // accept を画像以外の形式だけにすると、iPadは「写真ライブラリ」ではなく「ファイル」の画面を
     // すぐ開く。application/octet-stream は iPad では「すべてのファイル」扱いになり、STEPも灰色にならない。
     fileInput.setAttribute('accept', zipInput.getAttribute('accept'));
-    folderOpenBtn.title = 'フォルダを圧縮したZIP(「ファイル」アプリでフォルダを長押し→「圧縮」)を選びます';
+    folderOpenBtn.title = 'フォルダをタップして中に入り、右上の「開く」で選びます';
   }
   zipInput.addEventListener('change', () => {
     const files = Array.from(zipInput.files || []);
     zipInput.value = '';
     openStepFiles(files);
   });
-  async function pickFolder() {
-    if (isIOS) {
-      showToast('iPadではフォルダを直接選べません。「ファイル」アプリでフォルダを長押し→「圧縮」で作ったZIPを選んでください(STEPを複数まとめて選んでも可)。');
-      zipInput.click();
-      return;
+  function iosDirSupported() {
+    const ua = navigator.userAgent;
+    let m = ua.match(/OS (\d+)_(\d+)/) || ua.match(/Version\/(\d+)\.(\d+)/);
+    if (!m) return true; // 判定できないときはフォルダ選択を試す
+    const major = +m[1], minor = +m[2];
+    return major > 18 || (major === 18 && minor >= 4);
+  }
+  // v444: iPadでは「フォルダを選ぶ」「ZIP・複数のSTEPを選ぶ」を選んでもらう。iPadのフォルダ選択画面
+  // ではフォルダをタップすると中に入って中のファイルが見えるが、それで正常。中に入った状態で
+  // 右上の「開く」を押すと、そのフォルダが選ばれる(「開く」が無いiPadOS 18.4より前はZIPを使う)。
+  function showIosFolderChooser() {
+    let box = document.getElementById('iosFolderChooser');
+    if (!box) {
+      const dirOk = iosDirSupported();
+      box = document.createElement('div');
+      box.id = 'iosFolderChooser';
+      box.setAttribute('role', 'dialog');
+      box.setAttribute('aria-label', 'フォルダの開き方');
+      box.style.cssText = 'position:fixed;inset:0;z-index:100001;display:flex;align-items:center;justify-content:center;' +
+        'background:rgba(0,0,0,.45);padding:16px;box-sizing:border-box;';
+      box.innerHTML = '<div style="width:min(100%,480px);box-sizing:border-box;padding:18px;border-radius:12px;background:#fff;color:#1d2a28;' +
+        'box-shadow:0 10px 40px rgba(0,0,0,.35);font-size:14px;line-height:1.6;display:flex;flex-direction:column;gap:12px">' +
+        '<div style="font-weight:700;font-size:16px">フォルダの開き方</div>' +
+        '<button id="iosPickDir" class="btn btn-accent" style="width:100%"' + (dirOk ? '' : ' disabled') + '>フォルダを選ぶ</button>' +
+        '<div style="font-size:13px;color:#4a5a57;margin-top:-6px">' + (dirOk
+          ? '次の画面で、STEPが入ったフォルダを<b>タップして中に入り</b>(中のファイルが表示されます)、そのまま<b>右上の「開く」</b>を押してください。'
+          : 'このiPadのバージョンではフォルダを直接選べません(iPadOS 18.4以降で使えます)。下のZIPを使ってください。') + '</div>' +
+        '<button id="iosPickZip" class="btn btn-install" style="width:100%">ZIP・複数のSTEPを選ぶ</button>' +
+        '<div style="font-size:13px;color:#4a5a57;margin-top:-6px">「ファイル」アプリでフォルダを長押し→「圧縮」で作ったZIPを選びます。</div>' +
+        '<button id="iosPickCancel" class="btn btn-ghost-label" style="align-self:flex-end">キャンセル</button></div>';
+      document.body.appendChild(box);
+      box.querySelector('#iosPickDir').addEventListener('click', () => { box.hidden = true; folderInput.click(); });
+      box.querySelector('#iosPickZip').addEventListener('click', () => { box.hidden = true; zipInput.click(); });
+      box.querySelector('#iosPickCancel').addEventListener('click', () => { box.hidden = true; });
+      box.addEventListener('click', (e) => { if (e.target === box) box.hidden = true; });
     }
+    box.hidden = false;
+  }
+  async function pickFolder() {
+    if (isIOS) { showIosFolderChooser(); return; }
     if (!canPickDir) { folderInput.click(); return; }
     let h;
     try {
@@ -16636,54 +16668,7 @@ pmi._lineFarPoint = null;
   emptyState.addEventListener('dragover', (e) => { e.preventDefault(); });
   emptyState.addEventListener('drop', handleDroppedFile);
 
-  // v439: 「URLをコピー」。共有ページは別の枠の中で動くため、ページ自身の場所(location)は
-  // 共有URLにならない。共有URLは固定(更新しても変わらない)なので、ここに書いておく。
-  // v440: GitHub Pages などの公開サイトに置いたときは、そのページのURLをそのままコピーする。
-  let SHARE_URL = 'https://claude.ai/artifact/HZofdfYFfSDH2Kh6bprpjG';
-  try {
-    if (/^https?:$/.test(location.protocol) && window.self === window.top && !/^(localhost|127\.)/.test(location.hostname)) {
-      SHARE_URL = location.origin + location.pathname.replace(/index\.html$/, '');
-    }
-  } catch (e) {}
-  (() => {
-    const btn = document.getElementById('shareUrlBtn');
-    const box = document.createElement('div');
-    box.id = 'shareUrlPanel';
-    box.hidden = true;
-    box.setAttribute('role', 'dialog');
-    box.setAttribute('aria-label', '共有URL');
-    box.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:100001;' +
-      'width:min(92vw,520px);box-sizing:border-box;padding:16px;border-radius:10px;background:#fff;color:#1d2a28;' +
-      'box-shadow:0 10px 40px rgba(0,0,0,.35);font-size:14px;display:flex;flex-direction:column;gap:10px;';
-    box.innerHTML = '<div style="font-weight:600">このビューアの共有URL</div>' +
-      '<input id="shareUrlText" type="text" readonly style="width:100%;box-sizing:border-box;padding:8px;font-size:14px;border:1px solid #b9c7c4;border-radius:6px;background:#f6f8f8;color:#1d2a28">' +
-      '<div id="shareUrlMsg" style="font-size:13px;color:#4a5a57">URLを送れば、パソコン・iPad・スマホのブラウザで開けます。</div>' +
-      '<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">' +
-      '<button id="shareUrlCopy" class="btn btn-accent">コピー</button>' +
-      '<button id="shareUrlClose" class="btn btn-install">閉じる</button></div>';
-    document.body.appendChild(box);
-    const txt = box.querySelector('#shareUrlText');
-    const msg = box.querySelector('#shareUrlMsg');
-    txt.value = SHARE_URL;
-    const selectAll = () => { txt.focus(); txt.select(); try { txt.setSelectionRange(0, txt.value.length); } catch (e) {} };
-    async function copy() {
-      try {
-        await navigator.clipboard.writeText(SHARE_URL);
-        msg.textContent = 'コピーしました。メールやLINEなどに貼り付けて送ってください。';
-        showToast('共有URLをコピーしました');
-      } catch (e) {
-        selectAll();
-        let ok = false;
-        try { ok = document.execCommand('copy'); } catch (e2) {}
-        msg.textContent = ok ? 'コピーしました。メールやLINEなどに貼り付けて送ってください。'
-          : '自動でコピーできませんでした。選択されているURLを長押し(右クリック)して「コピー」を選んでください。';
-      }
-    }
-    btn.addEventListener('click', () => { box.hidden = false; msg.textContent = 'URLを送れば、パソコン・iPad・スマホのブラウザで開けます。'; copy(); });
-    box.querySelector('#shareUrlCopy').addEventListener('click', copy);
-    box.querySelector('#shareUrlClose').addEventListener('click', () => { box.hidden = true; });
-    txt.addEventListener('focus', selectAll);
-  })();
+  // v442: 「URLをコピー」ボタンは不要との要望で廃止。
 
   // v437: URL共有版。ビューアと同じ場所に models/manifest.json(同梱したSTEPの一覧)があれば、
   // 開いただけで自動で読み込む(フォルダを開いたときと同じ処理)。STEPはサーバーから
@@ -16691,20 +16676,25 @@ pmi._lineFarPoint = null;
   // パソコンで単体HTMLとして開いた場合(file://)や一覧がない場合は、これまでどおり。
   (async () => {
     if (AUTO_LOAD_DEMO || location.protocol === 'file:') return;
-    let man = null;
-    try {
-      const r = await fetch('models/manifest.json', { cache: 'no-cache' });
-      if (!r.ok) return;
-      man = await r.json();
-    } catch (e) { return; }
+    // v441: GitHubへのアップロードで models フォルダが無くなり、ファイルがビューアと同じ場所に
+    // 並ぶこともあるため、models/ と同じ場所の両方を探す。STEPは一覧と同じ場所から読む。
+    let man = null, base = '';
+    for (const dir of ['models/', '']) {
+      try {
+        const r = await fetch(dir + 'manifest.json', { cache: 'no-cache' });
+        if (!r.ok) continue;
+        const j = await r.json();
+        if (j && Array.isArray(j.files)) { man = j; base = dir; break; }
+      } catch (e) {}
+    }
     if (!man || !Array.isArray(man.files) || !man.files.length) return;
     const list = man.files.map((m) => {
       let cache = null;
       return {
-        name: m.name, size: m.size || 0, lastModified: m.lastModified || 0, fromUrl: m.path,
+        name: m.name, size: m.size || 0, lastModified: m.lastModified || 0, fromUrl: base + String(m.path).split('/').pop(),
         arrayBuffer: () => {
           if (!cache) {
-            cache = fetch(m.path).then((r) => {
+            cache = fetch(base + String(m.path).split('/').pop()).then((r) => {
               if (!r.ok) throw new Error('「' + m.name + '」を取得できませんでした(' + r.status + ')');
               return r.arrayBuffer();
             });
