@@ -1160,7 +1160,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v488</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v490</div>
   <!-- v338: 寸法値の位置決めロジック(render()内)が実際に毎フレーム
        計算している値を、画面上でそのまま確認できる簡易デバッグ表示。
        選択中のPMIが寸法のときだけ表示される。開発者ツールを開かなくても
@@ -1304,6 +1304,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v490: STEPファイルに記録されている色(SOLIDWORKSで付けた色)で、モデルをそのまま表示するようにしました。色の付いていない面は、これまでどおりの青で表示します。</li>
         <li>v488: 部品表の罫線がわずかに傾いて記録されているSTEP(例「40A-雑用水管-4」)で、行の区切りが見つからず、文字が重なって部品表が崩れていた問題を修正しました。ほぼ水平・垂直な罫線はまっすぐにそろえてから表を組み立てます。</li>
         <li>v487: バルブのフランジなど、穴のある面や自由曲面(B-spline)の形が、ぎざぎざに欠けたりずれたりして表示されていた問題を修正しました。穴のある面は穴を正しくくり抜いて三角形に分け、自由曲面は曲面の式どおりに分割します(扱えない面は従来の方法で表示します)。また、同じ寸法を複数置いたときに名前の末尾に付く連番(例「座ぐり穴4@座ぐり穴3(34.5)-2」の「-2」)があっても、寸法の数値を読み取るようにしました。</li>
         <li>v486: v481で、英字だけの文字列(「SCH/CLASS」など)や一部の文字列で、字ごとに大きさがばらばらになっていた問題を修正しました。漢字・かなを含む文字列(複数の塊に分かれた幅の広い字があるもの)だけで英数字の大きさをそろえ、全角・半角の見分けも字形のつながりと幅で行うようにしました。</li>
@@ -6039,6 +6040,93 @@
   // 頂点(VERTEX_POINT)と円(CIRCLE)の位置だけから外形の箱(bbox)とオカレンスの木を求める。
   // サブアセンブリのSTEPは、PMIと「中身が親のその部分と合っているか」の確認用の外形
   // だけが必要なため、この軽い方法で読む。
+  // v490: STEPに記録されている色(SOLIDWORKSで付けた色)を面ごとに求める。
+  // STYLED_ITEM(名前, (スタイル), 対象) の対象が
+  //   ソリッド(MANIFOLD_SOLID_BREP / BREP_WITH_VOIDS など)・シェル → その全ての面
+  //   面(ADVANCED_FACE) → その面だけ(ソリッドの色より優先)
+  // OVER_RIDING_STYLED_ITEM(上書きの色)はさらに優先する。色は面の塗り(SURFACE_STYLE_…)の
+  // COLOUR_RGB / DRAUGHTING_PRE_DEFINED_COLOUR を使い、無いときだけ線の色などを使う。
+  // 戻り値: Map(面の番号 → 0xRRGGBB)
+  function stepFaceColors(model) {
+    const E = model.entities;
+    const out = new Map();
+    const PRE = { red: 0xff0000, green: 0x00ff00, blue: 0x0000ff, yellow: 0xffff00, magenta: 0xff00ff, cyan: 0x00ffff, black: 0x000000, white: 0xffffff };
+    const typeOfBody = (b) => { const m = /^([A-Z_0-9]+)\s*\(/.exec(b || ""); return m ? m[1] : ""; };
+    const argsSimple = (b) => { const i = b.indexOf("("); return topLevelSplit(b.slice(i + 1, -1)); };
+    const SKIP_SURF = { CURVE_STYLE: 1, POINT_STYLE: 1, TEXT_STYLE: 1, TEXT_STYLE_WITH_BOX_CHARACTERISTICS: 1 };
+    const colCache = new Map();
+    function colorFrom(id, surfaceOnly, depth, seen) {
+      if (depth > 12 || seen.has(id)) return null;
+      seen.add(id);
+      const b = E.get(id);
+      if (!b) return null;
+      const t = typeOfBody(b);
+      if (t === "COLOUR_RGB") {
+        const a = argsSimple(b);
+        const v = a.slice(1, 4).map((x) => Math.max(0, Math.min(255, Math.round(parseFloat(x) * 255))));
+        if (v.length === 3 && v.every((x) => isFinite(x))) return (v[0] << 16) | (v[1] << 8) | v[2];
+        return null;
+      }
+      if (t === "DRAUGHTING_PRE_DEFINED_COLOUR" || t === "PRE_DEFINED_COLOUR") {
+        const m = /'([^']*)'/.exec(b);
+        const k = m ? m[1].toLowerCase() : "";
+        return PRE[k] != null ? PRE[k] : null;
+      }
+      if (surfaceOnly && SKIP_SURF[t]) return null;
+      for (const r of refs(b.slice(b.indexOf("(")))) {
+        const c = colorFrom(r, surfaceOnly, depth + 1, seen);
+        if (c != null) return c;
+      }
+      return null;
+    }
+    function styleColor(styleRefs) {
+      const key = styleRefs.join(",");
+      if (colCache.has(key)) return colCache.get(key);
+      let c = null;
+      for (const r of styleRefs) { c = colorFrom(r, true, 0, new Set()); if (c != null) break; }
+      if (c == null) for (const r of styleRefs) { c = colorFrom(r, false, 0, new Set()); if (c != null) break; }
+      colCache.set(key, c);
+      return c;
+    }
+    function facesOfItem(id) {
+      const b = E.get(id);
+      if (!b) return [];
+      const t = typeOfBody(b);
+      if (t === "ADVANCED_FACE" || t === "FACE_SURFACE") return [+id];
+      const shells = [];
+      if (t === "CLOSED_SHELL" || t === "OPEN_SHELL" || t === "ORIENTED_CLOSED_SHELL") shells.push(id);
+      else if (t === "MANIFOLD_SOLID_BREP" || t === "FACETED_BREP" || t === "BREP_WITH_VOIDS" || t === "SHELL_BASED_SURFACE_MODEL") {
+        const a = argsSimple(b);
+        for (let k = 1; k < a.length; k++) for (const r of refs(a[k])) shells.push(r);
+      } else return [];
+      const faceIds = new Set();
+      for (const sh of shells) { try { model.collectFacesEdgesFromShell(sh, new Set(), faceIds); } catch (e) {} }
+      return Array.from(faceIds, (f) => +f);
+    }
+    const jobs = []; // [優先度, 面の配列, 色]
+    for (const [, b] of E) {
+      const t = typeOfBody(b);
+      if (t !== "STYLED_ITEM" && t !== "OVER_RIDING_STYLED_ITEM" && t !== "CONTEXT_DEPENDENT_OVER_RIDING_STYLED_ITEM") continue;
+      const a = argsSimple(b);
+      if (a.length < 3) continue;
+      const item = refs(a[2])[0];
+      if (!item) continue;
+      const ib = E.get(item);
+      if (!ib) continue;
+      const it = typeOfBody(ib);
+      const isFace = it === "ADVANCED_FACE" || it === "FACE_SURFACE";
+      if (!isFace && !/^(MANIFOLD_SOLID_BREP|FACETED_BREP|BREP_WITH_VOIDS|SHELL_BASED_SURFACE_MODEL|CLOSED_SHELL|OPEN_SHELL|ORIENTED_CLOSED_SHELL)$/.test(it)) continue;
+      const c = styleColor(refs(a[1]));
+      if (c == null) continue;
+      const faces = facesOfItem(item);
+      if (!faces.length) continue;
+      jobs.push([(t === "STYLED_ITEM" ? 0 : 2) + (isFace ? 1 : 0), faces, c]);
+    }
+    jobs.sort((x, y) => x[0] - y[0]);
+    for (const [, faces, c] of jobs) for (const f of faces) out.set(f, c);
+    return out;
+  }
+
   function extractModel(model, opts) {
     const boundsOnly = !!(opts && opts.boundsOnly);
     const localPtsCache = new Map();
@@ -6426,6 +6514,26 @@
       flatTriangles,
       flatNormals,
       faceRanges: typed ? Int32Array.from(faceRangeList) : faceRangeList,
+      // v490: STEPの色。[面の番号, 0xRRGGBB] の並び(色が付いている面だけ)
+      faceColors: (() => {
+        const fc = [];
+        try {
+          if (faceRangeList.length) {
+            const cm = stepFaceColors(model);
+            if (cm.size) {
+              const seenF = new Set();
+              for (let i = 0; i + 2 < faceRangeList.length; i += 3) {
+                const f = faceRangeList[i];
+                if (seenF.has(f)) continue;
+                seenF.add(f);
+                const c = cm.get(f);
+                if (c != null) fc.push(f, c);
+              }
+            }
+          }
+        } catch (e) { console.error("stepFaceColors failed:", e); }
+        return typed ? Int32Array.from(fc) : fc;
+      })(),
       bbox,
       unitScaleToMm: unitScale,
       // v397: サブアセンブリ選択用のアセンブリ構成(オカレンスの木)
@@ -8243,13 +8351,16 @@
   const FACE_VS = `
     attribute vec3 aPosition;
     attribute vec3 aNormal;
+    attribute vec3 aColor; // v490: STEPの色(頂点ごと)
     uniform mat4 uModel;
     uniform mat4 uView;
     uniform mat4 uProj;
     varying vec3 vNormalWorld;
+    varying vec3 vColor;
     void main() {
       gl_Position = uProj * uView * uModel * vec4(aPosition, 1.0);
       vNormalWorld = mat3(uModel) * aNormal;
+      vColor = aColor;
     }
   `;
   // Ambient + two-sided diffuse (the tessellation here doesn't guarantee
@@ -8259,7 +8370,9 @@
   const FACE_FS = `
     precision mediump float;
     varying vec3 vNormalWorld;
+    varying vec3 vColor;
     uniform vec3 uColor;
+    uniform float uUseVColor; // v490: 1ならSTEPの色(vColor)、0ならuColor(ハイライト等)
     uniform vec3 uLightDir;
     uniform vec3 uViewDir;
     uniform float uAlpha; // v398: 「周りを薄く表示」用の不透明度
@@ -8269,14 +8382,14 @@
       float diff = abs(dot(n, normalize(uLightDir)));
       float rim = pow(1.0 - abs(dot(n, v)), 2.5);
       float lighting = 0.38 + 0.56 * diff;
-      vec3 base = uColor * lighting;
+      vec3 base = mix(uColor, vColor, uUseVColor) * lighting;
       vec3 withRim = mix(base, vec3(1.0), rim * 0.35);
       gl_FragColor = vec4(withRim, uAlpha);
     }
   `;
 
   let lineProgram, uModelLoc, uViewLoc, uProjLoc, uColorLoc, uDepthBiasLoc, aPositionLoc;
-  let faceProgram, fuModelLoc, fuViewLoc, fuProjLoc, fuColorLoc, fuLightLoc, fuViewDirLoc, faPositionLoc, faNormalLoc, fuAlphaLoc;
+  let faceProgram, fuModelLoc, fuViewLoc, fuProjLoc, fuColorLoc, fuLightLoc, fuViewDirLoc, faPositionLoc, faNormalLoc, fuAlphaLoc, faColorLoc, fuUseVColorLoc;
   if (gl) {
     lineProgram = createProgram(LINE_VS, LINE_FS);
     uModelLoc = gl.getUniformLocation(lineProgram, 'uModel');
@@ -8296,6 +8409,8 @@
     fuAlphaLoc = gl.getUniformLocation(faceProgram, 'uAlpha');
     faPositionLoc = gl.getAttribLocation(faceProgram, 'aPosition');
     faNormalLoc = gl.getAttribLocation(faceProgram, 'aNormal');
+    faColorLoc = gl.getAttribLocation(faceProgram, 'aColor');
+    fuUseVColorLoc = gl.getUniformLocation(faceProgram, 'uUseVColor');
   }
 
   function hexToRgb01(hex) {
@@ -8644,14 +8759,36 @@
       const normBuf = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, normBuf);
       gl.bufferData(gl.ARRAY_BUFFER, normals, gl.STATIC_DRAW);
-      modelFaceData = { posBuf, normBuf, count: positions.length / 3 };
+      // v490: STEPに記録されている面の色を頂点ごとの色にする(色の無い面は従来のモデルの色)
+      let colors = null;
+      if (modelData.faceColors && modelData.faceColors.length && modelData.faceRanges && modelData.faceRanges.length) {
+        const FC = modelData.faceColors, F = modelData.faceRanges;
+        const cmap = new Map();
+        for (let i = 0; i + 1 < FC.length; i += 2) cmap.set(FC[i], FC[i + 1]);
+        colors = new Float32Array(positions.length);
+        for (let i = 0; i < colors.length; i += 3) { colors[i] = COLOR_MODEL[0]; colors[i + 1] = COLOR_MODEL[1]; colors[i + 2] = COLOR_MODEL[2]; }
+        for (let i = 0; i + 2 < F.length; i += 3) {
+          const c = cmap.get(F[i]);
+          if (c == null) continue;
+          const r = ((c >> 16) & 255) / 255, g = ((c >> 8) & 255) / 255, b = (c & 255) / 255;
+          const v0 = F[i + 1] * 9, v1 = Math.min(colors.length, (F[i + 1] + F[i + 2]) * 9);
+          for (let o = v0; o < v1; o += 3) { colors[o] = r; colors[o + 1] = g; colors[o + 2] = b; }
+        }
+      }
+      let colBuf = null;
+      if (colors) {
+        colBuf = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, colBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, colors, gl.STATIC_DRAW);
+      }
+      modelFaceData = { posBuf, normBuf, colBuf, count: positions.length / 3 };
 
       // エリア表示切り替え用に、三角形ごとの重心からエリアを判定し、
       // エリアごとに絞り込んだ専用のバッファも作っておく(全エリア表示
       // のときは上のmodelFaceDataをそのまま使い、特定のエリアだけ表示
       // するときはこちらに差し替える)。
       for (const key of Object.keys(modelFaceDataByArea)) {
-        if (gl) { gl.deleteBuffer(modelFaceDataByArea[key].posBuf); gl.deleteBuffer(modelFaceDataByArea[key].normBuf); }
+        if (gl) { gl.deleteBuffer(modelFaceDataByArea[key].posBuf); gl.deleteBuffer(modelFaceDataByArea[key].normBuf); if (modelFaceDataByArea[key].colBuf) gl.deleteBuffer(modelFaceDataByArea[key].colBuf); }
         delete modelFaceDataByArea[key];
       }
       if (AREA_NAMES.length) {
@@ -8671,13 +8808,14 @@
           areaOfTri[t] = ai;
           areaCount[ai]++;
         }
-        const posByArea = {}, normByArea = {}, fill = new Uint32Array(AREA_NAMES.length);
-        AREA_NAMES.forEach((name, i) => { posByArea[name] = new Float32Array(areaCount[i] * 9); normByArea[name] = new Float32Array(areaCount[i] * 9); });
-        const posArrs = AREA_NAMES.map((n) => posByArea[n]), normArrs = AREA_NAMES.map((n) => normByArea[n]);
+        const posByArea = {}, normByArea = {}, colByArea = {}, fill = new Uint32Array(AREA_NAMES.length);
+        AREA_NAMES.forEach((name, i) => { posByArea[name] = new Float32Array(areaCount[i] * 9); normByArea[name] = new Float32Array(areaCount[i] * 9); if (colors) colByArea[name] = new Float32Array(areaCount[i] * 9); });
+        const posArrs = AREA_NAMES.map((n) => posByArea[n]), normArrs = AREA_NAMES.map((n) => normByArea[n]), colArrs = AREA_NAMES.map((n) => colByArea[n]);
         for (let t = 0; t < triCount2; t++) {
           const ai = areaOfTri[t], o = t * 9, d = fill[ai];
-          const pa = posArrs[ai], na = normArrs[ai];
+          const pa = posArrs[ai], na = normArrs[ai], ca = colArrs[ai];
           for (let k = 0; k < 9; k++) { pa[d + k] = positions[o + k]; na[d + k] = normals[o + k]; }
+          if (ca) for (let k = 0; k < 9; k++) ca[d + k] = colors[o + k];
           fill[ai] = d + 9;
         }
         for (const name of AREA_NAMES) {
@@ -8689,7 +8827,13 @@
           const nBuf = gl.createBuffer();
           gl.bindBuffer(gl.ARRAY_BUFFER, nBuf);
           gl.bufferData(gl.ARRAY_BUFFER, normArr, gl.STATIC_DRAW);
-          modelFaceDataByArea[name] = { posBuf: pBuf, normBuf: nBuf, count: posArr.length / 3 };
+          let cBuf = null;
+          if (colByArea[name]) {
+            cBuf = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, cBuf);
+            gl.bufferData(gl.ARRAY_BUFFER, colByArea[name], gl.STATIC_DRAW);
+          }
+          modelFaceDataByArea[name] = { posBuf: pBuf, normBuf: nBuf, colBuf: cBuf, count: posArr.length / 3 };
         }
       }
     }
@@ -14501,7 +14645,7 @@
     deleteLineBuffer(modelLineData);
     if (gl && modelFaceData) { gl.deleteBuffer(modelFaceData.posBuf); gl.deleteBuffer(modelFaceData.normBuf); }
     for (const key of Object.keys(modelFaceDataByArea)) {
-      if (gl) { gl.deleteBuffer(modelFaceDataByArea[key].posBuf); gl.deleteBuffer(modelFaceDataByArea[key].normBuf); }
+      if (gl) { gl.deleteBuffer(modelFaceDataByArea[key].posBuf); gl.deleteBuffer(modelFaceDataByArea[key].normBuf); if (modelFaceDataByArea[key].colBuf) gl.deleteBuffer(modelFaceDataByArea[key].colBuf); }
       delete modelFaceDataByArea[key];
     }
     }
@@ -18247,6 +18391,18 @@ pmi._lineFarPoint = null;
         gl.bindBuffer(gl.ARRAY_BUFFER, activeFaceData.normBuf);
         gl.vertexAttribPointer(faNormalLoc, 3, gl.FLOAT, false, 0, 0);
         gl.enableVertexAttribArray(faNormalLoc);
+        // v490: STEPの色があれば頂点ごとの色で塗る(ハイライト等の塗り重ねはuUseVColor=0で単色)
+        if (faColorLoc >= 0) {
+          if (activeFaceData.colBuf) {
+            gl.bindBuffer(gl.ARRAY_BUFFER, activeFaceData.colBuf);
+            gl.vertexAttribPointer(faColorLoc, 3, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(faColorLoc);
+          } else {
+            gl.disableVertexAttribArray(faColorLoc);
+            gl.vertexAttrib3f(faColorLoc, COLOR_MODEL[0], COLOR_MODEL[1], COLOR_MODEL[2]);
+          }
+        }
+        gl.uniform1f(fuUseVColorLoc, 1.0);
         gl.uniform1f(fuAlphaLoc, 1.0);
         const occIso = occView !== 'all' && occSelected >= 0 && occNodes[occSelected] && activeFaceData === modelFaceData;
         if (!occIso) {
@@ -18260,6 +18416,7 @@ pmi._lineFarPoint = null;
             gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
             gl.depthMask(false);
             gl.uniform1f(fuAlphaLoc, 0.13);
+            gl.uniform1f(fuUseVColorLoc, 0.0);
             gl.uniform3f(fuColorLoc, COLOR_OCC_GHOST[0], COLOR_OCC_GHOST[1], COLOR_OCC_GHOST[2]);
             if (o.triStart > 0) gl.drawArrays(gl.TRIANGLES, 0, o.triStart * 3);
             const totalTris = activeFaceData.count / 3;
@@ -18277,6 +18434,7 @@ pmi._lineFarPoint = null;
           const cnt = (o.triEnd - o.triStart) * 3;
           if (cnt > 0) {
             gl.depthFunc(gl.LEQUAL);
+            gl.uniform1f(fuUseVColorLoc, 0.0);
             gl.uniform3f(fuColorLoc, COLOR_OCC_SELECT[0], COLOR_OCC_SELECT[1], COLOR_OCC_SELECT[2]);
             gl.drawArrays(gl.TRIANGLES, o.triStart * 3, cnt);
             gl.depthFunc(gl.LESS);
@@ -18313,6 +18471,7 @@ pmi._lineFarPoint = null;
               for (let i = 0; i < ranges.length; i += 2) if (ranges[i] < o.triStart || ranges[i] >= o.triEnd) ranges[i + 1] = 0;
             }
             if (!ranges.length) continue;
+            gl.uniform1f(fuUseVColorLoc, 0.0);
             gl.uniform3f(fuColorLoc, col[0], col[1], col[2]);
             gl.depthFunc(gl.LEQUAL);
             for (let i = 0; i < ranges.length; i += 2) if (ranges[i + 1] > 0) gl.drawArrays(gl.TRIANGLES, ranges[i] * 3, ranges[i + 1] * 3);
@@ -18329,6 +18488,7 @@ pmi._lineFarPoint = null;
             gl.depthFunc(gl.LESS);
           }
         }
+        if (faColorLoc >= 0) gl.disableVertexAttribArray(faColorLoc);
         gl.useProgram(lineProgram);
         gl.uniformMatrix4fv(uModelLoc, false, worldMatrix);
         gl.uniformMatrix4fv(uViewLoc, false, VIEW_MATRIX);
