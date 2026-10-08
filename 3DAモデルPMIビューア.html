@@ -1160,7 +1160,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v490</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v492</div>
   <!-- v338: 寸法値の位置決めロジック(render()内)が実際に毎フレーム
        計算している値を、画面上でそのまま確認できる簡易デバッグ表示。
        選択中のPMIが寸法のときだけ表示される。開発者ツールを開かなくても
@@ -1304,6 +1304,8 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v492: 公開版(URLで開いたビューア)を開いたままでも、新しい版がアップロードされると自動で読み込み直して新しい版に切り替わるようにしました(1分ごとと、画面に戻ったときに確認します)。</li>
+        <li>v491: モデルの向きによって寸法補助線だけが消え、寸法線と寸法値が残って表示されることがあった問題を修正しました。寸法補助線は3Dのモデル上で一度だけ選び出し、どの向きから見ても同じ線を描きます。寸法補助線が描けない向き(線が画面上で点のように潰れるなど)では、寸法線・寸法値・矢印もまとめて非表示にします。</li>
         <li>v490: STEPファイルに記録されている色(SOLIDWORKSで付けた色)で、モデルをそのまま表示するようにしました。色の付いていない面は、これまでどおりの青で表示します。</li>
         <li>v488: 部品表の罫線がわずかに傾いて記録されているSTEP(例「40A-雑用水管-4」)で、行の区切りが見つからず、文字が重なって部品表が崩れていた問題を修正しました。ほぼ水平・垂直な罫線はまっすぐにそろえてから表を組み立てます。</li>
         <li>v487: バルブのフランジなど、穴のある面や自由曲面(B-spline)の形が、ぎざぎざに欠けたりずれたりして表示されていた問題を修正しました。穴のある面は穴を正しくくり抜いて三角形に分け、自由曲面は曲面の式どおりに分割します(扱えない面は従来の方法で表示します)。また、同じ寸法を複数置いたときに名前の末尾に付く連番(例「座ぐり穴4@座ぐり穴3(34.5)-2」の「-2」)があっても、寸法の数値を読み取るようにしました。</li>
@@ -17979,6 +17981,80 @@ pmi._lineFarPoint = null;
   markRenderActive(3000);
   // JIS B 0001:2019 11.2/11.3 に合わせて寸法線と寸法補助線だけを再構成する。
   // 寸法文字列・フォント・サイズ・STEP記録文字の処理は変更しない。
+  // v491: 寸法補助線は、モデルの向きによって画面上で直角に見えないと消えてしまい、
+  // 寸法線と寸法値だけが残ることがあった(ユーザー指摘)。寸法補助線の選び出しは
+  // 画面上ではなく3D(モデル座標)で一度だけ行い、どの向きから見ても同じ線を使う。
+  // さらに、寸法補助線が描けない(画面上で潰れる・投影できない)ときは、寸法線・
+  // 寸法値・矢印も含めて寸法全体をまとめて非表示にする(_dimWholeHidden)。
+  function jisDimExtensionInfo3D(pmi) {
+    const pts = pmi && pmi._dimArrowLinePoints;
+    if (!pts || pts.length !== 2) return null;
+    if (pmi._jisExtCache && pmi._jisExtCache.lines === pmi.lines && pmi._jisExtCache.a === pts[0] && pmi._jisExtCache.b === pts[1]) return pmi._jisExtCache.info;
+    const sub=(u,v)=>[u[0]-v[0],u[1]-v[1],u[2]-v[2]];
+    const len=(u)=>Math.hypot(u[0],u[1],u[2]);
+    const near3=(p,a,b)=>{
+      const d=sub(b,a),ll=d[0]*d[0]+d[1]*d[1]+d[2]*d[2];
+      if(ll<1e-12)return a.slice();
+      let t=((p[0]-a[0])*d[0]+(p[1]-a[1])*d[1]+(p[2]-a[2])*d[2])/ll;
+      t=Math.max(0,Math.min(1,t));
+      return [a[0]+d[0]*t,a[1]+d[1]*t,a[2]+d[2]*t];
+    };
+    const A=pts[0],B=pts[1],AB=sub(B,A),L=len(AB);
+    const info={exts:[]};
+    if(L>1e-9){
+      const u=[AB[0]/L,AB[1]/L,AB[2]/L];
+      const lim=Math.max(L*0.25,1);
+      const cands=[];
+      for(const seg of (pmi.lines||[])){
+        if(!seg||seg.length!==2)continue;
+        const v=sub(seg[1],seg[0]),sl=len(v); if(sl<1e-6)continue;
+        // JIS 11.2 b: 寸法補助線は寸法線に対して直角(3Dで判定)
+        if(Math.abs((v[0]*u[0]+v[1]*u[1]+v[2]*u[2])/sl)>0.30)continue;
+        cands.push(seg);
+      }
+      const used=[];
+      for(const side of [A,B]){
+        let best=null,bestD=Infinity,bestQ=null;
+        for(const c of cands){
+          if(used.includes(c))continue;
+          const q=near3(side,c[0],c[1]),d=len(sub(side,q));
+          if(d<bestD){bestD=d;best=c;bestQ=q;}
+        }
+        if(!best||bestD>lim)continue;
+        used.push(best);
+        const feature=len(sub(best[0],bestQ))>len(sub(best[1],bestQ))?best[0]:best[1];
+        // 寸法線の端(矢印の先端)から見て、モデル側(寸法補助線の起点)が十分離れているものだけ
+        if(len(sub(feature,side))<1e-6)continue;
+        info.exts.push({side,feature});
+      }
+    }
+    pmi._jisExtCache={lines:pmi.lines,a:A,b:B,info};
+    return info;
+  }
+  // 画面上の寸法線・寸法補助線を求める。寸法補助線がデータにあるのに描けない場合は null。
+  function jisDimScreenGeometry(mvp, pmi) {
+    const info=jisDimExtensionInfo3D(pmi);
+    if(!info) return {skip:true};
+    const pts=pmi._dimArrowLinePoints;
+    const a=project(mvp,pts[0]), b=project(mvp,pts[1]);
+    if(!a||!b) return null;
+    const L=Math.hypot(b.x-a.x,b.y-a.y);
+    if(L<1) return null;
+    const exts=[];
+    for(const e of info.exts){
+      const s=project(mvp,e.side), f=project(mvp,e.feature);
+      if(!s||!f) return null;
+      const el=Math.hypot(s.x-f.x,s.y-f.y);
+      // 寸法補助線が画面上でほぼ点に潰れて見えない向き → 寸法全体を消す
+      if(el<3) return null;
+      // JIS 11.2 b: 寸法線を僅かに超える側へ約3px延長。
+      const over={x:s.x+(s.x-f.x)/el*3,y:s.y+(s.y-f.y)/el*3};
+      exts.push({feature:f,over});
+    }
+    return {a,b,exts};
+  }
+  // JIS B 0001:2019 11.2/11.3 に合わせて寸法線と寸法補助線だけを再構成する。
+  // 寸法文字列・フォント・サイズ・STEP記録文字の処理は変更しない。
   function updateJisDimensionLines(mvp, dimensionPmis) {
     const svg = document.getElementById('dimensionJisLines');
     if (!svg) return;
@@ -17987,56 +18063,14 @@ pmi._lineFarPoint = null;
       if (!a || !b) return;
       out.push('<line class="'+cls+'" x1="'+a.x.toFixed(2)+'" y1="'+a.y.toFixed(2)+'" x2="'+b.x.toFixed(2)+'" y2="'+b.y.toFixed(2)+'"/>');
     };
-    const dist=(a,b)=>Math.hypot(b.x-a.x,b.y-a.y);
-    const nearSeg=(p,a,b)=>{
-      const dx=b.x-a.x,dy=b.y-a.y,ll=dx*dx+dy*dy;
-      if(ll<1e-12)return {x:a.x,y:a.y};
-      let t=((p.x-a.x)*dx+(p.y-a.y)*dy)/ll;
-      t=Math.max(0,Math.min(1,t));
-      return {x:a.x+dx*t,y:a.y+dy*t};
-    };
     for(const pmi of (dimensionPmis||[])){
       if(!pmi || pmi._counterboreHidden || pmi.category!=='dimension' || !pmi._dimArrowLinePoints || pmi._dimArrowLinePoints.length!==2) continue;
-      if(!isCategoryVisible(pmi) || pmi._markerOccluded || pmi._farOccluded) continue;
-      const a=project(mvp,pmi._dimArrowLinePoints[0]), b=project(mvp,pmi._dimArrowLinePoints[1]);
-      if(!a||!b) continue;
-      const L=dist(a,b); if(L<1) continue;
-      const ux=(b.x-a.x)/L, uy=(b.y-a.y)/L;
+      if(!isCategoryVisible(pmi) || pmi._markerOccluded || pmi._farOccluded || pmi._dimWholeHidden || pmi._diamHideRealGraphic) continue;
+      const g=jisDimScreenGeometry(mvp,pmi);
+      if(!g||g.skip) continue;
       // JIS 11.3: 寸法線は測定方向に平行。
-      draw(a,b,'jis-dim-line');
-      const candidates=[];
-      for(const seg of (pmi.lines||[])){
-        if(!seg||seg.length!==2)continue;
-        const s0=project(mvp,seg[0]),s1=project(mvp,seg[1]);
-        if(!s0||!s1)continue;
-        const sl=dist(s0,s1); if(sl<3)continue;
-        const vx=(s1.x-s0.x)/sl,vy=(s1.y-s0.y)/sl;
-        // JIS 11.2 b: 寸法補助線は寸法線に対して直角。
-        if(Math.abs(vx*ux+vy*uy)>0.30)continue;
-        const ca=nearSeg(a,s0,s1),cb=nearSeg(b,s0,s1);
-        const da=dist(a,ca),db=dist(b,cb);
-        const best=Math.min(da,db);
-        if(best>Math.max(30,L*0.25))continue;
-        candidates.push({s0,s1,ca,cb,da,db,sl});
-      }
-      const used=[];
-      for(const side of [a,b]){
-        let best=null,bestD=Infinity;
-        for(const c of candidates){
-          if(used.includes(c))continue;
-          const q=nearSeg(side,c.s0,c.s1),d=dist(side,q);
-          if(d<bestD){bestD=d;best=c;}
-        }
-        if(!best||bestD>Math.max(30,L*0.25))continue;
-        used.push(best);
-        const q=nearSeg(side,best.s0,best.s1);
-        const d0=dist(best.s0,q),d1=dist(best.s1,q);
-        const feature=d0>d1?best.s0:best.s1;
-        // JIS 11.2 b: 寸法線を僅かに超える側へ約3px延長。
-        const ex=side.x-q.x,ey=side.y-q.y,el=Math.hypot(ex,ey)||1;
-        const over={x:side.x+ex/el*3,y:side.y+ey/el*3};
-        draw(feature,over,'jis-dim-extension');
-      }
+      draw(g.a,g.b,'jis-dim-line');
+      for(const e of g.exts) draw(e.feature,e.over,'jis-dim-extension');
     }
     svg.innerHTML=out.join('');
   }
@@ -18590,7 +18624,9 @@ pmi._lineFarPoint = null;
         if (pmi.category === 'dimension') {
           const segs = pmi._segVisible;
           const allSegHidden = Array.isArray(segs) && segs.length > 0 && segs.every((v) => !v);
-          if (pmi._markerOccluded || diamHide || allSegHidden || pmi._dimThinHidden) {
+          // v491: 寸法補助線が描けない向きでは、寸法線・寸法値・矢印もまとめて消す
+          const jisG = (pmi._dimArrowLinePoints && pmi._dimArrowLinePoints.length === 2) ? jisDimScreenGeometry(mvp, pmi) : { skip: true };
+          if (pmi._markerOccluded || diamHide || allSegHidden || pmi._dimThinHidden || !jisG) {
             pmi._dimWholeHidden = true;
             continue;
           }
@@ -21720,6 +21756,49 @@ pmi._lineFarPoint = null;
   window.addEventListener('appinstalled', () => {
     if (installBtn) installBtn.hidden = true;
   });
+</script>
+<script>
+// v492: 公開版(GitHub Pages)を開いたままでも、新しい版をアップロードすると自動で切り替わる。
+// 同じ場所の version.json(例 {"build":492})を1分ごと・画面に戻ったときに確認し、
+// 今の版より新しければ、ひと言表示してから新しい版を読み込み直す。
+// パソコンで単体HTMLとして開いた場合(file://)は確認できないため何もしない。
+(function () {
+  if (location.protocol === 'file:') return;
+  var badge = document.getElementById('buildBadge');
+  var m = badge && /v(\d+)/.exec(badge.textContent || '');
+  var current = m ? parseInt(m[1], 10) : 0;
+  if (!current) return;
+  var busy = false, last = 0;
+  function check() {
+    if (busy || Date.now() - last < 20000) return;
+    busy = true; last = Date.now();
+    fetch('version.json?t=' + Date.now(), { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        var next = j && parseInt(j.build, 10);
+        if (!next || next <= current) return;
+        var key = 'pmiViewerReloadTried';
+        var tried = null;
+        try { tried = sessionStorage.getItem(key); } catch (e) {}
+        if (tried === String(next)) return; // 同じ版への切り替えは1回だけ(読み込み直しの繰り返しを防ぐ)
+        try { sessionStorage.setItem(key, String(next)); } catch (e) {}
+        var note = document.createElement('div');
+        note.textContent = '新しい版(v' + next + ')に更新します…';
+        note.style.cssText = 'position:fixed;left:50%;top:12px;transform:translateX(-50%);z-index:100000;background:#1b7f6e;color:#fff;padding:8px 16px;border-radius:8px;font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,.3);';
+        document.body.appendChild(note);
+        setTimeout(function () {
+          location.replace(location.pathname + '?v=' + next + location.hash);
+        }, 1500);
+      })
+      .catch(function () {})
+      .then(function () { busy = false; });
+  }
+  setInterval(check, 60000);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) check(); });
+  window.addEventListener('focus', check);
+  window.addEventListener('pageshow', check);
+  setTimeout(check, 5000);
+})();
 </script>
 </body>
 </html>
