@@ -1160,7 +1160,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v492</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v493</div>
   <!-- v338: 寸法値の位置決めロジック(render()内)が実際に毎フレーム
        計算している値を、画面上でそのまま確認できる簡易デバッグ表示。
        選択中のPMIが寸法のときだけ表示される。開発者ツールを開かなくても
@@ -1304,6 +1304,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v493: URLで開いたときに同梱のSTEPを自動で読み込むのをやめました。開いた直後は空の画面になり、「STEPファイルを開く」または「フォルダを開く」から自分で読み込みます。</li>
         <li>v492: 公開版(URLで開いたビューア)を開いたままでも、新しい版がアップロードされると自動で読み込み直して新しい版に切り替わるようにしました(1分ごとと、画面に戻ったときに確認します)。</li>
         <li>v491: モデルの向きによって寸法補助線だけが消え、寸法線と寸法値が残って表示されることがあった問題を修正しました。寸法補助線は3Dのモデル上で一度だけ選び出し、どの向きから見ても同じ線を描きます。寸法補助線が描けない向き(線が画面上で点のように潰れるなど)では、寸法線・寸法値・矢印もまとめて非表示にします。</li>
         <li>v490: STEPファイルに記録されている色(SOLIDWORKSで付けた色)で、モデルをそのまま表示するようにしました。色の付いていない面は、これまでどおりの青で表示します。</li>
@@ -21669,6 +21670,8 @@ pmi._lineFarPoint = null;
   // 必要になったときに取得する(親の判定に使うもの以外のサブアセンブリは、選んだときに取得)。
   // パソコンで単体HTMLとして開いた場合(file://)や一覧がない場合は、これまでどおり。
   (async () => {
+    // v493: 開いたときにSTEPを自動で読み込むのはやめ、利用者が自分でSTEPファイル/フォルダを開く方式に戻した。
+    if (true) return;
     if (AUTO_LOAD_DEMO || location.protocol === 'file:') return;
     // v441: GitHubへのアップロードで models フォルダが無くなり、ファイルがビューアと同じ場所に
     // 並ぶこともあるため、models/ と同じ場所の両方を探す。STEPは一覧と同じ場所から読む。
