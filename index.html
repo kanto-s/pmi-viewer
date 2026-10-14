@@ -1160,7 +1160,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v495</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v496</div>
   <!-- v338: 寸法値の位置決めロジック(render()内)が実際に毎フレーム
        計算している値を、画面上でそのまま確認できる簡易デバッグ表示。
        選択中のPMIが寸法のときだけ表示される。開発者ツールを開かなくても
@@ -1304,6 +1304,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v496: 同じ配管系統(例: 雑用水管)の一部の管だけが暗めの水色で表示され、2色に分かれて見えていた問題を修正しました。STEPに残っていた「アセンブリ上で面1枚だけに付けた色」は使わず、部品の色で一色に表示します。</li>
         <li>v495: モデルの稜線(部品の境目・角の線)を常に表示するようにしました(リボンの「稜線」ボタンは削除し、オフにできないようにしました)。</li>
         <li>v494: 共同研究先からの指摘に対応しました。(1) モデルの稜線(角の線)を表示するようにし、パイプと90°エルボなど部品どうしの境目(取り合い)が分かるようにしました(滑らかにつながる接線・継ぎ目の線は出しません。v495以降は常に表示)。(2) 溶接記号の矢は、モデルの向きに合わせて溶接する継ぎ目の線の上の「見えている点」を指すようにしました。裏側を指さず、できるだけモデルを横切らずに外側から指します(元の点が見えていて外側から指せるときは、CADの位置のままです)。溶接記号を選ぶと、指している継ぎ目の線を溶接記号の色で強調します</li>
         <li>v493: URLで開いたときに同梱のSTEPを自動で読み込むのをやめました。開いた直後は空の画面になり、「STEPファイルを開く」または「フォルダを開く」から自分で読み込みます。</li>
@@ -6173,6 +6174,11 @@
       if (!ib) continue;
       const it = typeOfBody(ib);
       const isFace = it === "ADVANCED_FACE" || it === "FACE_SURFACE";
+      // v496: アセンブリ上で「面1枚だけ」に付けた上書きの色(CONTEXT_DEPENDENT_OVER_RIDING_STYLED_ITEM)は使わない。
+      // SOLIDWORKSの画面では部品の色(例: 雑用水管の青)で一色に見えるのに、STEPにはパイプの円筒面などに
+      // 別の色(暗めの水色)が残っていることがあり、そのまま塗ると同じ配管が2色に分かれて見えるため。
+      // 部品全体・ソリッド全体への上書きはこれまでどおり使う。
+      if (isFace && t === "CONTEXT_DEPENDENT_OVER_RIDING_STYLED_ITEM") continue;
       if (!isFace && !/^(MANIFOLD_SOLID_BREP|FACETED_BREP|BREP_WITH_VOIDS|SHELL_BASED_SURFACE_MODEL|CLOSED_SHELL|OPEN_SHELL|ORIENTED_CLOSED_SHELL)$/.test(it)) continue;
       const c = styleColor(refs(a[1]));
       if (c == null) continue;
