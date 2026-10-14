@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v505</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v506</div>
   <!-- v338: 寸法値の位置決めロジック(render()内)が実際に毎フレーム
        計算している値を、画面上でそのまま確認できる簡易デバッグ表示。
        選択中のPMIが寸法のときだけ表示される。開発者ツールを開かなくても
@@ -1310,6 +1310,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v506: 照合番号(バルーン)の置き方を、向きのルールで決めるようにしました。アセンブリの中ほどから出る番号は指示線を真横(左右のうちほかの部品が少ない側)に、画面上でいちばん上に見えているサブアセンブリの番号は指示線を上に出します。伸ばす途中にほかの部品やモデルがあれば、番号の丸がかからない手前で止めます。左右どちらにもすき間が無いときだけ、最大15°まで傾けて置き場所を探します。</li>
         <li>v505: v504で重なりを避けることを優先しすぎて、照合番号(バルーン)がモデルから離れすぎ、指示線が長くなっていた問題を修正しました。指示線の長さに上限(画面上でおよそ140px)を設け、それより遠い置き場所は使いません。上限の中で、寸法線・モデル・ほかの番号や指示線との重なりが最も少ない場所を選びます。</li>
         <li>v504: 照合番号(バルーン)の丸が寸法補助線に重なることがあった問題を修正しました。STEPに記録された寸法補助線(画面に描いている線そのもの)も重なりの判定に含め、寸法線・寸法補助線・モデル・ほかの番号や指示線との重なりは、指示線の長さなどより必ず優先して避けます(置き場所の候補も増やしました)。</li>
         <li>v503: 照合番号(バルーン)・溶接記号の指示線どうしが交差したり、指示線がほかの番号の丸の上を通ったりしないようにしました。置き場所を選ぶときにこれらを強く避け、動かしたあとにもう一度全体を見直します。</li>
@@ -18207,7 +18208,8 @@ pmi._lineFarPoint = null;
   const WELD_CROSS_FIX_MIN_FRAC = 0.08;
   // v501: 照合番号・溶接記号の指示線の長さの目安(画面上のpx)。SOFTを超えると減点が増え、
   // HARDを超えるとさらに大きく減点する。HARDより長い指示線は、近くの置き場所へ移し直す対象にする。
-  const LEADER_SOFT_PX = 80, LEADER_HARD_PX = 140; // v505: 指示線の長さの上限を短く(v501: 110/190)
+  const LEADER_SOFT_PX = 80, LEADER_HARD_PX = 140;
+  const BALLOON_RULE_LEADER_PX = 55; // v506: 照合番号の指示線の目安の長さ(丸の縁まで) // v505: 指示線の長さの上限を短く(v501: 110/190)
   const leaderLenPenalty = (len) => len * 0.3 + Math.max(0, len - LEADER_SOFT_PX) * 6 + Math.max(0, len - LEADER_HARD_PX) * 12;
   // v499: 照合番号(注記)の指示線が、指している部品「以外」のモデルの上を通る割合。
   // 指示線はモデル側の点Oで自分の部品に触れるので、Oから外へ向かって最初に続く
@@ -18375,6 +18377,36 @@ pmi._lineFarPoint = null;
       return O ? [O, P] : null;
     };
     // v503: 先に動かした番号の位置を踏まえて、もう一度見直す(2回)
+    // v506: 照合番号の向きのルール。画面上でいちばん上に見えている品目(部品表の番号)の
+    // 照合番号は指示線を上へ、それ以外は真横(左右のうち置きやすい側)へ出す。
+    const topBalloons = new Set();
+    try {
+      const m = mvp, T = modelAllTris;
+      const itemTop = new Map();
+      const topOf = (num) => {
+        if (itemTop.has(num)) return itemTop.get(num);
+        let top = Infinity;
+        const occs = (bomRowOccs && bomRowOccs.get(num)) || [];
+        for (const occ of occs) {
+          const o = occNodes[occ];
+          if (!o || !T || o.triEnd <= o.triStart) continue;
+          const nV = (o.triEnd - o.triStart) * 3, step = Math.max(1, Math.floor(nV / 600));
+          for (let v = o.triStart * 3; v < o.triEnd * 3; v += step) {
+            const X = T[v * 3], Y = T[v * 3 + 1], Z = T[v * 3 + 2];
+            const ww = m[3] * X + m[7] * Y + m[11] * Z + m[15];
+            if (ww <= 0.0001) continue;
+            const py = (1 - ((m[1] * X + m[5] * Y + m[9] * Z + m[13]) / ww * 0.5 + 0.5)) * ch;
+            if (py < top) top = py;
+          }
+        }
+        itemTop.set(num, top);
+        return top;
+      };
+      const notes = welds.filter((p) => p.category === 'note' && p._bomNum != null);
+      let minTop = Infinity;
+      for (const p of notes) minTop = Math.min(minTop, topOf(p._bomNum));
+      if (minTop < Infinity) for (const p of notes) if (topOf(p._bomNum) <= minTop + 2) topBalloons.add(p);
+    } catch (e) { /* ルールの上下判定ができなければ、すべて真横 */ }
     for (let pass = 0; pass < 2; pass++) for (const w of welds) {
       const g = geo.get(w);
       if (!g || !(g.w > 0)) continue;
@@ -18440,7 +18472,8 @@ pmi._lineFarPoint = null;
         Math.hypot(cur.K.x - cur.tip.screen.x, cur.K.y - cur.tip.screen.y) <= LEADER_HARD_PX; // v501: 離れすぎも直す
       // 前回移していなければ、問題が無い限り動かさない。前回移していたときは、元の置き場所に
       // 問題が無くても、移した先を使い続けた方がよいかを比べる(回転中に行ったり来たりしないように)
-      if (curOk && !w._crossFixPrev) continue;
+      const ruleBalloon = isNote && w._bomNum != null; // v506: 照合番号は向きのルールで置く(毎回)
+      if (curOk && !w._crossFixPrev && !ruleBalloon) continue;
       const cost = (P, ev) => {
         const rect = ev.rect, tip = ev.tip;
         let c = tip.frac * 2400;
@@ -18480,6 +18513,64 @@ pmi._lineFarPoint = null;
       let best = { P: P0, cost: cost(P0, cur) + (w._crossFixPrev ? 400 : 0), key: null };
       // v505: 今の置き場所の指示線が上限より長ければ、重なりが少なくても近くの置き場所を優先する
       if (Math.hypot(cur.K.x - cur.tip.screen.x, cur.K.y - cur.tip.screen.y) > LEADER_HARD_PX) best.cost = Infinity;
+      // v506: 照合番号は、決めた向き(真横 / 一番上の品目は上)に指示線を伸ばし、
+      // 番号の丸がほかの部品・モデルにかからず、指示線がほかの部品の上を通らない範囲で、
+      // 目安の長さ(BALLOON_RULE_LEADER_PX)に近い位置に置く。途中にほかの部品があれば、その手前で止める。
+      // 真横に置けるすき間が左右どちらにも無いときだけ、最大15°まで傾けて探す。
+      if (ruleBalloon) {
+        const rad = Math.max(g.w, g.h) / 2;
+        const D0 = rad + BALLOON_RULE_LEADER_PX, Dmax = rad + LEADER_HARD_PX;
+        const isTop = topBalloons.has(w);
+        const tryDir = (deg) => {
+          const a = deg * Math.PI / 180, dx = Math.cos(a), dy = Math.sin(a);
+          const steps = [];
+          for (let D = rad + 4; D <= Dmax; D += 5) {
+            const P = { x: O0.x + dx * D, y: O0.y + dy * D };
+            const ev = evalAt(P);
+            const ok = !!ev && ev.tip.frac === 0 && rectOnModel(ev.rect) === 0 &&
+              !(ev.rect.x0 < 4 || ev.rect.y0 < Math.max(4, ribbonBottom + 4) || ev.rect.x1 > cw - 4 || ev.rect.y1 > ch - 4) &&
+              !banned.some((b) => ov(ev.rect, b, 0));
+            steps.push({ D, P, ev, ok });
+          }
+          const i0 = steps.findIndex((st) => st.ok);
+          if (i0 < 0) return null;
+          let i1 = i0;
+          while (i1 + 1 < steps.length && steps[i1 + 1].ok) i1++; // ほかの部品に当たる手前まで
+          const target = Math.max(D0, steps[i0].D);
+          let bestS = null;
+          for (let i = i0; i <= i1; i++) {
+            const st = steps[i];
+            let tangle = tangleOf(st.ev);
+            for (const r of otherRects) if (ov(st.ev.rect, r, 6)) { tangle++; break; }
+            const c = (tangle ? 50000 * tangle : 0) + (rectHitsDim(st.ev.rect) ? 8000 : 0) +
+              leaderDimCrosses(st.ev.K, st.ev.tip.screen) * 300 + Math.abs(st.D - target) * 4;
+            if (!bestS || c < bestS.c) bestS = { P: st.P, c, tangle };
+          }
+          return bestS;
+        };
+        const bases = isTop ? [-90] : [0, 180];
+        let pick = null;
+        const consider = (base, tilt) => {
+          const r = tryDir(base + tilt);
+          if (!r) return;
+          let c = r.c + Math.abs(tilt) * 400;
+          if (w._ruleSide === base) c -= 200; // 回転中に左右が入れ替わり続けないように
+          if (!pick || c < pick.c) pick = { P: r.P, c, base, tangle: r.tangle };
+        };
+        for (const b of bases) consider(b, 0);
+        if (!pick || pick.tangle) {
+          for (const t of [5, -5, 10, -10, 15, -15]) for (const b of bases) consider(b, t);
+          if ((!pick || pick.tangle) && isTop) { for (const b of [0, 180]) for (const t of [0, 5, -5, 10, -10, 15, -15]) consider(b, t); }
+        }
+        if (pick) {
+          w._ruleSide = pick.base;
+          w._crossFixPrev = 'rule';
+          w._screen.x = pick.P.x - g.offX;
+          w._screen.y = pick.P.y - g.offY;
+          continue;
+        }
+        // どの向きにも置けないときは、これまでどおり周りから探す
+      }
       const L0 = 60; // v501: 置き場所の候補はモデル側の点の近く(約35〜140px)から選ぶ
       for (let k = 0; k < 36; k++) { // v504: 10°おきの36方向
         const a = k * Math.PI / 18, dx = Math.cos(a), dy = Math.sin(a);
