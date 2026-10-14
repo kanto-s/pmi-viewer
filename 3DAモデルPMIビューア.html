@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v500</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v501</div>
   <!-- v338: 寸法値の位置決めロジック(render()内)が実際に毎フレーム
        計算している値を、画面上でそのまま確認できる簡易デバッグ表示。
        選択中のPMIが寸法のときだけ表示される。開発者ツールを開かなくても
@@ -1310,6 +1310,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v501: 照合番号(バルーン)・溶接記号がモデルから離れすぎて、指示線が長くなる場面があった問題を修正しました。指示線はおおむね110px程度までを目安にし、それより長くなる置き場所は大きく不利にします(長すぎるものは近くの置き場所へ移します)。モデルや寸法補助線を避けるための移動もこの範囲の中で行い、番号・記号がモデルの上に乗る置き場所は最も避けます。</li>
         <li>v500: サブアセンブリを選んだときの選択パネル(左上)にモデルが重ならないようにしました。縦向きのiPadなど幅の狭い画面でも、パネルの右側か下側の広い方にモデルとPMIを収めます</li>
         <li>v499: 照合番号(部品表バルーン)の指示線が、指している部品以外のモデルの上を横切ったり通り過ぎたりしないよう、番号の置き場所を選び直すようにしました。あわせて、照合番号・溶接記号の丸や枠が寸法線・寸法補助線に重なる位置や、指示線が寸法補助線に重なったり横切ったりする位置も避けます(避けられないときは、なるべく少ない位置にします)。</li>
         <li>v498: 部品表を「拡大」したときに、モデルが部品表パネルの下に隠れないようにしました。拡大パネルは画面の右側6割まで(縦長の画面では下半分。場所が足りないときは開いている間だけリボンをたたみます)にし、モデルとPMIは残りの範囲に収めて表示します。拡大パネルを開いている間は、右下の小さな部品表は隠します</li>
@@ -18039,6 +18040,7 @@ pmi._lineFarPoint = null;
           for (const sg of dimSegs) if (segHitsRectR(sg[0], sg[1], { x0: rect.x0 - 4, x1: rect.x1 + 4, y0: rect.y0 - 4, y1: rect.y1 + 4 })) { pen += 1800; break; }
           const L = Math.hypot(P.x - O.x, P.y - O.y);
           pen += Math.max(0, L - maxLeader) * 3;
+          pen += Math.max(0, L - LEADER_SOFT_PX) * 4; // v501: モデルから離れすぎない
           // v495: 指示線がモデル(ほかの部品)の上を横切る割合に応じて減点(全部横切ると2400点)
           const ld = leaderFor(P, rect);
           pen += ld.frac * 2400;
@@ -18190,6 +18192,10 @@ pmi._lineFarPoint = null;
     return { K, dy };
   }
   const WELD_CROSS_FIX_MIN_FRAC = 0.08;
+  // v501: 照合番号・溶接記号の指示線の長さの目安(画面上のpx)。SOFTを超えると減点が増え、
+  // HARDを超えるとさらに大きく減点する。HARDより長い指示線は、近くの置き場所へ移し直す対象にする。
+  const LEADER_SOFT_PX = 110, LEADER_HARD_PX = 190;
+  const leaderLenPenalty = (len) => len * 0.3 + Math.max(0, len - LEADER_SOFT_PX) * 6 + Math.max(0, len - LEADER_HARD_PX) * 12;
   // v499: 照合番号(注記)の指示線が、指している部品「以外」のモデルの上を通る割合。
   // 指示線はモデル側の点Oで自分の部品に触れるので、Oから外へ向かって最初に続く
   // 「モデルの上」の区間(=指している部品そのもの)は数えず、その先で別のモデルの上を
@@ -18390,7 +18396,8 @@ pmi._lineFarPoint = null;
       // 指示線がモデルを横切っていない、かつ記号自体もモデルにほとんど重なっていなければ動かさない
       if (!cur) { w._crossFixPrev = null; continue; }
       const curOk = cur.tip.frac <= WELD_CROSS_FIX_MIN_FRAC && rectOnModel(cur.rect) < 0.2 &&
-        !rectHitsDim(cur.rect) && leaderDimCrosses(cur.K, cur.tip.screen) === 0 && leaderDimNear(cur.K, cur.tip.screen) < 0.05;
+        !rectHitsDim(cur.rect) && leaderDimCrosses(cur.K, cur.tip.screen) === 0 && leaderDimNear(cur.K, cur.tip.screen) < 0.05 &&
+        Math.hypot(cur.K.x - cur.tip.screen.x, cur.K.y - cur.tip.screen.y) <= LEADER_HARD_PX; // v501: 離れすぎも直す
       // 前回移していなければ、問題が無い限り動かさない。前回移していたときは、元の置き場所に
       // 問題が無くても、移した先を使い続けた方がよいかを比べる(回転中に行ったり来たりしないように)
       if (curOk && !w._crossFixPrev) continue;
@@ -18408,7 +18415,7 @@ pmi._lineFarPoint = null;
         let c = tip.frac * 2400;
         for (const r of otherRects) if (ov(rect, r, 6)) { c += 3000; break; }
         // v499: 番号・記号がモデルの上に乗る置き場所は強く避ける(少しでも乗ると減点)
-        { const om = rectOnModel(rect); c += om * 3000 + (om > 0 ? 500 : 0); }
+        { const om = rectOnModel(rect); c += om * 6000 + (om > 0 ? 1500 : 0); } // v501: モデルに乗るのは一番避ける
         for (const [a, b] of otherLeaders) if (segX(tip.screen, ev.K, a, b)) c += 1500;
         // v499: 番号の丸・記号の枠が寸法線・寸法補助線に重なる / 指示線が寸法補助線を横切る
         if (rectHitsDim(rect)) c += 2600;
@@ -18416,14 +18423,15 @@ pmi._lineFarPoint = null;
         c += leaderDimNear(ev.K, tip.screen) * 3000;
         if (rect.x0 < 4 || rect.y0 < Math.max(4, ribbonBottom + 4) || rect.x1 > cw - 4 || rect.y1 > ch - 4) c += 2500;
         for (const b of banned) if (ov(rect, b, 0)) { c += 2500; break; }
-        c += Math.hypot(P.x - P0.x, P.y - P0.y) * 0.4 + Math.hypot(P.x - tip.screen.x, P.y - tip.screen.y) * 0.3;
+        // v501: 指示線の長さ(番号の丸・記号の縁からモデル側の点まで)が長いほど不利にする
+        c += Math.hypot(P.x - P0.x, P.y - P0.y) * 0.2 + leaderLenPenalty(Math.hypot(ev.K.x - tip.screen.x, ev.K.y - tip.screen.y));
         return c;
       };
       let best = { P: P0, cost: cost(P0, cur) + (w._crossFixPrev ? 400 : 0), key: null };
-      const L0 = Math.max(90, Math.min(220, Math.hypot(P0.x - O0.x, P0.y - O0.y)));
+      const L0 = 70; // v501: 置き場所の候補はモデル側の点の近く(約35〜140px)から選ぶ
       for (let k = 0; k < 24; k++) {
         const a = k * Math.PI / 12, dx = Math.cos(a), dy = Math.sin(a);
-        for (const mul of [0.55, 0.8, 1.2, 1.7, 2.3]) {
+        for (const mul of [0.5, 0.8, 1.15, 1.55, 2.0, 2.6]) {
           const dist = L0 * mul + Math.abs(dx) * g.w / 2 + Math.abs(dy) * g.h / 2;
           const P = { x: O0.x + dx * dist, y: O0.y + dy * dist };
           const ev = evalAt(P);
