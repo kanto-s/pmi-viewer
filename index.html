@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v501</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v502</div>
   <!-- v338: 寸法値の位置決めロジック(render()内)が実際に毎フレーム
        計算している値を、画面上でそのまま確認できる簡易デバッグ表示。
        選択中のPMIが寸法のときだけ表示される。開発者ツールを開かなくても
@@ -1310,6 +1310,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v502: 見る向きによって、照合番号(バルーン)の指示線がほかの部品の上を通り、番号と部品が重なって見えることがあった問題を修正しました。指示線が通る部品を、部品表の番号(品目)ごとに見分けるようにし、指している品目以外の部品と画面上で重なる置き場所を避けます。</li>
         <li>v501: 照合番号(バルーン)・溶接記号がモデルから離れすぎて、指示線が長くなる場面があった問題を修正しました。指示線はおおむね110px程度までを目安にし、それより長くなる置き場所は大きく不利にします(長すぎるものは近くの置き場所へ移します)。モデルや寸法補助線を避けるための移動もこの範囲の中で行い、番号・記号がモデルの上に乗る置き場所は最も避けます。</li>
         <li>v500: サブアセンブリを選んだときの選択パネル(左上)にモデルが重ならないようにしました。縦向きのiPadなど幅の狭い画面でも、パネルの右側か下側の広い方にモデルとPMIを収めます</li>
         <li>v499: 照合番号(部品表バルーン)の指示線が、指している部品以外のモデルの上を横切ったり通り過ぎたりしないよう、番号の置き場所を選び直すようにしました。あわせて、照合番号・溶接記号の丸や枠が寸法線・寸法補助線に重なる位置や、指示線が寸法補助線に重なったり横切ったりする位置も避けます(避けられないときは、なるべく少ない位置にします)。</li>
@@ -15839,12 +15840,20 @@
   // サブアセンブリ、単体表示中はその直下)に属するか。照合番号の指示線が「指している品目以外」
   // の上を通るかを調べるのに使う。
   const occGroupCache = new Map();
+  const BOM_GROUP_BASE = 1000000; // v502: 部品表の番号で分けた品目の番号(オカレンス番号と区別する)
   function occGroupOfLeaf(leaf) {
     if (leaf == null || leaf < 0 || !occNodes || !occNodes[leaf]) return -1;
     const ctx = (occView !== 'all' && occSelected >= 0) ? occSelected : -1;
-    const key = leaf + '|' + ctx + '|' + occNodes.length;
+    const key = leaf + '|' + ctx + '|' + occNodes.length + '|' + occBomName.size;
     let g = occGroupCache.get(key);
     if (g !== undefined) return g;
+    // v502: 全体表示では、部品表の番号(照合番号)の単位で分ける。部品表の品目は、STEPの構成では
+    // 最上位の直下とは限らない(入れ物のアセンブリの下に品目が並ぶ)ため、最上位の直下で分けると
+    // すべての部品が同じ品目とみなされ、ほかの部品の上を通る指示線を見逃していた。
+    if (ctx < 0) {
+      const row = bomRowOfOcc(leaf);
+      if (row != null) { g = BOM_GROUP_BASE + row; occGroupCache.set(key, g); return g; }
+    }
     g = leaf;
     let i = leaf, guard = 0;
     while (i >= 0 && occNodes[i] && guard++ < 64) {
@@ -18044,6 +18053,7 @@ pmi._lineFarPoint = null;
           // v495: 指示線がモデル(ほかの部品)の上を横切る割合に応じて減点(全部横切ると2400点)
           const ld = leaderFor(P, rect);
           pen += ld.frac * 2400;
+          if (pmi.category === 'note' && ld.frac > 0) pen += 1500 + ld.frac * 5000; // v502: 照合番号はほかの部品と重ねない
           // v499: 指示線が寸法線・寸法補助線を横切る本数に応じて減点
           { let n = 0; for (const sg of dimSegs) if (segCrossesSeg(ld.O, P, sg[0], sg[1])) { if (++n >= 4) break; } pen += n * 600; }
           if (!bestPlace || pen < bestPlace.pen) bestPlace = { P, rect, pen, O: ld.O };
@@ -18210,7 +18220,10 @@ pmi._lineFarPoint = null;
     // (指している管の手前に別の管が重なって続いていても、別の部品として数えられる)
     if (cover.groupAt) {
       const gAt = (i) => { const t = (i + 0.5) / N; return cover.groupAt(O.x + dx * t, O.y + dy * t); };
-      let own = (pmi && pmi._bomLeaf != null) ? occGroupOfLeaf(pmi._bomLeaf) : -1;
+      let own = -1;
+      // v502: 照合番号は、番号そのもの(部品表の行)を指している品目とする
+      if (pmi && pmi._bomNum != null && !(occView !== 'all' && occSelected >= 0)) own = BOM_GROUP_BASE + pmi._bomNum;
+      else if (pmi && pmi._bomLeaf != null) own = occGroupOfLeaf(pmi._bomLeaf);
       if (own < 0) {
         for (let i = 0; i < N && (L * (i + 0.5) / N) < 14; i++) { const g = gAt(i); if (g >= 0) { own = g; break; } }
       }
@@ -18343,8 +18356,10 @@ pmi._lineFarPoint = null;
     // 記号の枠の中にモデルがどれだけあるか(5×3点で調べる)
     const rectOnModel = (r) => {
       let h = 0;
-      for (let i = 0; i < 5; i++) for (let j = 0; j < 3; j++) if (cover.at(r.x0 + (r.x1 - r.x0) * (i + 0.5) / 5, r.y0 + (r.y1 - r.y0) * (j + 0.5) / 3)) h++;
-      return h / 15;
+      // v502: 小さな丸でも部品の縁に少しかかるのを見逃さないよう、少し外側(3px)まで7×7点で調べる
+      const X0 = r.x0 - 3, Y0 = r.y0 - 3, W = r.x1 - r.x0 + 6, H = r.y1 - r.y0 + 6;
+      for (let i = 0; i < 7; i++) for (let j = 0; j < 7; j++) if (cover.at(X0 + W * (i + 0.5) / 7, Y0 + H * (j + 0.5) / 7)) h++;
+      return h / 49;
     };
     const leaderOf = (p) => {
       const g = geo.get(p);
@@ -18395,7 +18410,7 @@ pmi._lineFarPoint = null;
       const cur = evalAt(P0);
       // 指示線がモデルを横切っていない、かつ記号自体もモデルにほとんど重なっていなければ動かさない
       if (!cur) { w._crossFixPrev = null; continue; }
-      const curOk = cur.tip.frac <= WELD_CROSS_FIX_MIN_FRAC && rectOnModel(cur.rect) < 0.2 &&
+      const curOk = cur.tip.frac <= (isNote ? 0 : WELD_CROSS_FIX_MIN_FRAC) && rectOnModel(cur.rect) < (isNote ? 0.001 : 0.2) &&
         !rectHitsDim(cur.rect) && leaderDimCrosses(cur.K, cur.tip.screen) === 0 && leaderDimNear(cur.K, cur.tip.screen) < 0.05 &&
         Math.hypot(cur.K.x - cur.tip.screen.x, cur.K.y - cur.tip.screen.y) <= LEADER_HARD_PX; // v501: 離れすぎも直す
       // 前回移していなければ、問題が無い限り動かさない。前回移していたときは、元の置き場所に
@@ -18413,6 +18428,8 @@ pmi._lineFarPoint = null;
       const cost = (P, ev) => {
         const rect = ev.rect, tip = ev.tip;
         let c = tip.frac * 2400;
+        // v502: 照合番号の指示線は、指している品目以外の部品と画面上で少しでも重なれば大きく減点する
+        if (isNote && tip.frac > 0) c += 2500 + tip.frac * 6000;
         for (const r of otherRects) if (ov(rect, r, 6)) { c += 3000; break; }
         // v499: 番号・記号がモデルの上に乗る置き場所は強く避ける(少しでも乗ると減点)
         { const om = rectOnModel(rect); c += om * 6000 + (om > 0 ? 1500 : 0); } // v501: モデルに乗るのは一番避ける
@@ -18431,7 +18448,7 @@ pmi._lineFarPoint = null;
       const L0 = 70; // v501: 置き場所の候補はモデル側の点の近く(約35〜140px)から選ぶ
       for (let k = 0; k < 24; k++) {
         const a = k * Math.PI / 12, dx = Math.cos(a), dy = Math.sin(a);
-        for (const mul of [0.5, 0.8, 1.15, 1.55, 2.0, 2.6]) {
+        for (const mul of [0.5, 0.8, 1.15, 1.55, 2.0, 2.6, 3.3]) {
           const dist = L0 * mul + Math.abs(dx) * g.w / 2 + Math.abs(dy) * g.h / 2;
           const P = { x: O0.x + dx * dist, y: O0.y + dy * dist };
           const ev = evalAt(P);
