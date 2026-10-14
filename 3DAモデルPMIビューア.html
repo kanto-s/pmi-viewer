@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v504</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v505</div>
   <!-- v338: 寸法値の位置決めロジック(render()内)が実際に毎フレーム
        計算している値を、画面上でそのまま確認できる簡易デバッグ表示。
        選択中のPMIが寸法のときだけ表示される。開発者ツールを開かなくても
@@ -1310,6 +1310,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v505: v504で重なりを避けることを優先しすぎて、照合番号(バルーン)がモデルから離れすぎ、指示線が長くなっていた問題を修正しました。指示線の長さに上限(画面上でおよそ140px)を設け、それより遠い置き場所は使いません。上限の中で、寸法線・モデル・ほかの番号や指示線との重なりが最も少ない場所を選びます。</li>
         <li>v504: 照合番号(バルーン)の丸が寸法補助線に重なることがあった問題を修正しました。STEPに記録された寸法補助線(画面に描いている線そのもの)も重なりの判定に含め、寸法線・寸法補助線・モデル・ほかの番号や指示線との重なりは、指示線の長さなどより必ず優先して避けます(置き場所の候補も増やしました)。</li>
         <li>v503: 照合番号(バルーン)・溶接記号の指示線どうしが交差したり、指示線がほかの番号の丸の上を通ったりしないようにしました。置き場所を選ぶときにこれらを強く避け、動かしたあとにもう一度全体を見直します。</li>
         <li>v502: 見る向きによって、照合番号(バルーン)の指示線がほかの部品の上を通り、番号と部品が重なって見えることがあった問題を修正しました。指示線が通る部品を、部品表の番号(品目)ごとに見分けるようにし、指している品目以外の部品と画面上で重なる置き場所を避けます。</li>
@@ -18206,7 +18207,7 @@ pmi._lineFarPoint = null;
   const WELD_CROSS_FIX_MIN_FRAC = 0.08;
   // v501: 照合番号・溶接記号の指示線の長さの目安(画面上のpx)。SOFTを超えると減点が増え、
   // HARDを超えるとさらに大きく減点する。HARDより長い指示線は、近くの置き場所へ移し直す対象にする。
-  const LEADER_SOFT_PX = 110, LEADER_HARD_PX = 190;
+  const LEADER_SOFT_PX = 80, LEADER_HARD_PX = 140; // v505: 指示線の長さの上限を短く(v501: 110/190)
   const leaderLenPenalty = (len) => len * 0.3 + Math.max(0, len - LEADER_SOFT_PX) * 6 + Math.max(0, len - LEADER_HARD_PX) * 12;
   // v499: 照合番号(注記)の指示線が、指している部品「以外」のモデルの上を通る割合。
   // 指示線はモデル側の点Oで自分の部品に触れるので、Oから外へ向かって最初に続く
@@ -18477,14 +18478,19 @@ pmi._lineFarPoint = null;
         return c;
       };
       let best = { P: P0, cost: cost(P0, cur) + (w._crossFixPrev ? 400 : 0), key: null };
-      const L0 = 70; // v501: 置き場所の候補はモデル側の点の近く(約35〜140px)から選ぶ
+      // v505: 今の置き場所の指示線が上限より長ければ、重なりが少なくても近くの置き場所を優先する
+      if (Math.hypot(cur.K.x - cur.tip.screen.x, cur.K.y - cur.tip.screen.y) > LEADER_HARD_PX) best.cost = Infinity;
+      const L0 = 60; // v501: 置き場所の候補はモデル側の点の近く(約35〜140px)から選ぶ
       for (let k = 0; k < 36; k++) { // v504: 10°おきの36方向
         const a = k * Math.PI / 18, dx = Math.cos(a), dy = Math.sin(a);
-        for (const mul of [0.5, 0.8, 1.15, 1.55, 2.0, 2.6, 3.3, 4.2]) {
+        for (const mul of [0.35, 0.55, 0.8, 1.1, 1.45, 1.85, 2.3]) {
           const dist = L0 * mul + Math.abs(dx) * g.w / 2 + Math.abs(dy) * g.h / 2;
           const P = { x: O0.x + dx * dist, y: O0.y + dy * dist };
           const ev = evalAt(P);
           if (!ev) continue;
+          // v505: 指示線が上限より長くなる置き場所は使わない(重なりを避けるためにモデルから
+          // 遠く離すことはしない。上限の中で重なりが最も少ない場所を選ぶ)
+          if (Math.hypot(ev.K.x - ev.tip.screen.x, ev.K.y - ev.tip.screen.y) > LEADER_HARD_PX) continue;
           let c = cost(P, ev);
           // 前回選んだ方向・距離は少し有利に(回転中に記号があちこち飛ばないように)
           const key = k + '|' + mul;
