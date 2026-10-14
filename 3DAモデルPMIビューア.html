@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v508</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v509</div>
   <!-- v338: 寸法値の位置決めロジック(render()内)が実際に毎フレーム
        計算している値を、画面上でそのまま確認できる簡易デバッグ表示。
        選択中のPMIが寸法のときだけ表示される。開発者ツールを開かなくても
@@ -1310,6 +1310,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v509: v508で、照合番号どうしが重なったままになる場面があった問題を修正しました(例: ②と⑤の丸が重なる)。向きのルール(真横・上)の候補だけでは重なりを避けられないときは、重なっている番号に指示点のまわり全方向の置き場所を候補として加えて解き直し、重ならないことを向きのルールより優先します。組み合わせを探す時間の上限も、候補作りとは別に数えるようにしました。</li>
         <li>v508: 照合番号(バルーン)の置き場所を、1つずつ順に決めるのではなく、表示中の番号全体でまとめて決めるようにしました(先に置いた番号が良い場所を取り、後の番号が重なるのを防ぐ)。向きのルール(真横 / 一番上の品目は上 / 部品の手前で止める / 寸法線を避けてずらす)に合う候補の中から、番号どうしの重なり・指示線の交差も含めて合計が最も良い組み合わせを選びます(計算は1回あたり6ミリ秒以内)。</li>
         <li>v507: 照合番号(バルーン)の丸が寸法線・寸法補助線にかかるときは、かからなくなるまで丸をずらすようにしました(指示線の向きに沿って前後、または直角の向きへ、ずれが少ない方を優先)。ずらした先でも、モデル・ほかの部品・ほかの番号や指示線とは重ならないようにします。</li>
         <li>v506: 照合番号(バルーン)の置き方を、向きのルールで決めるようにしました。アセンブリの中ほどから出る番号は指示線を真横(左右のうちほかの部品が少ない側)に、画面上でいちばん上に見えているサブアセンブリの番号は指示線を上に出します。伸ばす途中にほかの部品やモデルがあれば、番号の丸がかからない手前で止めます。左右どちらにもすき間が無いときだけ、最大15°まで傾けて置き場所を探します。</li>
@@ -18536,7 +18537,7 @@ pmi._lineFarPoint = null;
             pick.push(c);
             if (pick.length >= JOINT_MAX_CANDS) break;
           }
-          items.push({ w, g, cands: pick });
+          items.push({ w, g, cands: pick, O, rad, evalB, okStatic, unary, isTop });
         }
         const n = items.length;
         if (n) {
@@ -18549,14 +18550,17 @@ pmi._lineFarPoint = null;
             if (segTouchesRect(b.K, b.O, a.rect, 3)) c += 50000;
             return c;
           };
-          const PC = [];
-          for (let i = 0; i < n; i++) { PC.push([]); for (let j = 0; j < n; j++) PC[i].push(null); }
-          for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
-            const A = items[i].cands, B = items[j].cands;
-            const m = new Float64Array(A.length * B.length);
-            for (let a = 0; a < A.length; a++) for (let b = 0; b < B.length; b++) m[a * B.length + b] = pairCost(A[a], B[b]);
-            PC[i][j] = m;
-          }
+          let PC = null;
+          const buildPC = () => {
+            PC = [];
+            for (let i = 0; i < n; i++) { PC.push([]); for (let j = 0; j < n; j++) PC[i].push(null); }
+            for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+              const A = items[i].cands, B = items[j].cands;
+              const m = new Float64Array(A.length * B.length);
+              for (let a = 0; a < A.length; a++) for (let b = 0; b < B.length; b++) m[a * B.length + b] = pairCost(A[a], B[b]);
+              PC[i][j] = m;
+            }
+          };
           const pc = (i, a, j, b) => i < j ? PC[i][j][a * items[j].cands.length + b] : PC[j][i][b * items[i].cands.length + a];
           const total = (as) => { let s = 0; for (let i = 0; i < n; i++) { s += items[i].cands[as[i]].u; for (let j = i + 1; j < n; j++) s += pc(i, as[i], j, as[j]); } return s; };
           // 1つずつ最善に入れ替える(局所改善)
@@ -18576,27 +18580,78 @@ pmi._lineFarPoint = null;
             }
             return as;
           };
-          // 出発点: 各番号の単独で一番良い候補 → 局所改善。さらに順番を変えた貪欲配置からも試す。
-          let best = improve(items.map(() => 0)), bestV = total(best);
-          const order = [...Array(n).keys()];
           let tries = 0;
-          while (performance.now() - tJ0 < JOINT_TIME_BUDGET_MS && tries < 40 && n > 1) {
-            tries++;
-            for (let k = n - 1; k > 0; k--) { const r = Math.floor(Math.random() * (k + 1)); const t = order[k]; order[k] = order[r]; order[r] = t; }
-            const as = new Array(n).fill(-1);
-            for (const i of order) {
-              let bA = 0, bV = Infinity;
-              for (let a = 0; a < items[i].cands.length; a++) {
-                let v = items[i].cands[a].u;
-                for (let j = 0; j < n; j++) if (as[j] >= 0) v += pc(i, a, j, as[j]);
-                if (v < bV) { bV = v; bA = a; }
+          // 出発点: 各番号の単独で一番良い候補 → 局所改善。さらに順番を変えた貪欲配置からも試す。
+          // v509: 時間の上限は、候補作りとは別に、組み合わせ探しだけに対して数える
+          const solve = () => {
+            buildPC();
+            const tS = performance.now();
+            let bst = improve(items.map(() => 0)), bstV = total(bst);
+            const order = [...Array(n).keys()];
+            let k2 = 0;
+            while (performance.now() - tS < JOINT_TIME_BUDGET_MS && k2 < 60 && n > 1) {
+              k2++; tries++;
+              for (let k = n - 1; k > 0; k--) { const r = Math.floor(Math.random() * (k + 1)); const t = order[k]; order[k] = order[r]; order[r] = t; }
+              const as = new Array(n).fill(-1);
+              for (const i of order) {
+                let bA = 0, bV = Infinity;
+                for (let a = 0; a < items[i].cands.length; a++) {
+                  let v = items[i].cands[a].u;
+                  for (let j = 0; j < n; j++) if (as[j] >= 0) v += pc(i, a, j, as[j]);
+                  if (v < bV) { bV = v; bA = a; }
+                }
+                as[i] = bA;
               }
-              as[i] = bA;
+              improve(as);
+              const v = total(as);
+              if (v < bstV) { bstV = v; bst = as.slice(); }
+              if (bstV < 50000 && k2 >= 6) break; // 重なりの無い組み合わせが見つかれば十分
             }
-            improve(as);
-            const v = total(as);
-            if (v < bestV) { bestV = v; best = as.slice(); }
-            if (bestV < 50000 && tries >= 6) break; // 重なりの無い組み合わせが見つかれば十分
+            return [bst, bstV];
+          };
+          let [best, bestV] = solve();
+          // v509: 向きのルールの候補だけでは番号どうし(や指示線)の重なりが避けられないときは、
+          // 重なっている番号に「ルールから外れた置き場所(指示点のまわり全方向)」の候補を加えて解き直す。
+          // 重なりを無くすことを、真横・上の向きのルールより優先する(ルールから外れる分は減点)。
+          if (bestV >= 50000) {
+            const bad = new Set();
+            for (let i = 0; i < n; i++) {
+              if (items[i].cands[best[i]].u >= 50000) bad.add(i);
+              for (let j = i + 1; j < n; j++) if (pc(i, best[i], j, best[j]) >= 50000) { bad.add(i); bad.add(j); }
+            }
+            for (const i of bad) {
+              const it = items[i];
+              const ruleDeg = it.isTop ? -90 : null;
+              const extra = [];
+              for (let k = 0; k < 24; k++) {
+                const deg = k * 15, a = deg * Math.PI / 180, ux = Math.cos(a), uy = Math.sin(a);
+                const dev = ruleDeg == null ? Math.min(Math.abs(((deg + 180) % 360) - 180), Math.abs(((deg + 360) % 360) - 180)) : Math.abs(((deg - ruleDeg + 540) % 360) - 180);
+                for (let D = it.rad + 8; D <= it.rad + LEADER_HARD_PX * 1.5; D += 12) { // 重なりを避けるためなら上限の1.5倍まで
+                  const c = it.evalB({ x: it.O.x + ux * D, y: it.O.y + uy * D });
+                  // 番号どうしの重なりを無くすことを最優先にするため、ここでは「モデルに少しかかる」
+                  // 「指示線がほかの部品の上を通る」置き場所も、減点したうえで候補に入れる
+                  // (番号どうしの重なり 50000点 > モデルにかかる 約25000〜35000点 > 指示線がほかの部品を通る 約15000〜35000点)
+                  if (!inCanvas(c.rect)) continue;
+                  let soft = 0;
+                  const om = rectOnModel(c.rect);
+                  if (om > 0) soft += 25000 + om * 10000;
+                  const fr = noteLeaderOtherFrac(cover, c.K, c.O, it.w);
+                  if (fr > 0) soft += 15000 + fr * 20000;
+                  c.base = it.w._ruleSide != null ? it.w._ruleSide : 0;
+                  c.rule = 6000 + dev * 40 + D * 2 + soft;
+                  c.u = it.unary(c) + c.rule;
+                  if (c.u >= 50000 + 40000) continue;
+                  extra.push(c);
+                }
+              }
+              extra.sort((a, b) => a.u - b.u);
+              for (const c of extra) {
+                if (it.cands.some((q) => Math.hypot(q.P.x - c.P.x, q.P.y - c.P.y) < 8)) continue;
+                it.cands.push(c);
+                if (it.cands.length >= JOINT_MAX_CANDS + 24) break;
+              }
+            }
+            [best, bestV] = solve();
           }
           for (let i = 0; i < n; i++) {
             const it = items[i], c = it.cands[best[i]];
