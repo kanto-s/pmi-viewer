@@ -1160,7 +1160,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v493</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v494</div>
   <!-- v338: 寸法値の位置決めロジック(render()内)が実際に毎フレーム
        計算している値を、画面上でそのまま確認できる簡易デバッグ表示。
        選択中のPMIが寸法のときだけ表示される。開発者ツールを開かなくても
@@ -1304,6 +1304,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v494: 共同研究先からの指摘に対応しました。(1) モデルの稜線(角の線)を表示するようにし、パイプと90°エルボなど部品どうしの境目(取り合い)が分かるようにしました(滑らかにつながる接線・継ぎ目の線は出しません。リボンの「稜線」で表示・非表示を切り替えられます)。(2) 溶接記号の矢は、モデルの向きに合わせて溶接する継ぎ目の線の上の「見えている点」を指すようにしました。裏側を指さず、できるだけモデルを横切らずに外側から指します(元の点が見えていて外側から指せるときは、CADの位置のままです)。溶接記号を選ぶと、指している継ぎ目の線を溶接記号の色で強調します</li>
         <li>v493: URLで開いたときに同梱のSTEPを自動で読み込むのをやめました。開いた直後は空の画面になり、「STEPファイルを開く」または「フォルダを開く」から自分で読み込みます。</li>
         <li>v492: 公開版(URLで開いたビューア)を開いたままでも、新しい版がアップロードされると自動で読み込み直して新しい版に切り替わるようにしました(1分ごとと、画面に戻ったときに確認します)。</li>
         <li>v491: モデルの向きによって寸法補助線だけが消え、寸法線と寸法値が残って表示されることがあった問題を修正しました。寸法補助線は3Dのモデル上で一度だけ選び出し、どの向きから見ても同じ線を描きます。寸法補助線が描けない向き(線が画面上で点のように潰れるなど)では、寸法線・寸法値・矢印もまとめて非表示にします。</li>
@@ -1396,6 +1397,9 @@
 // 同じ描画コードで扱える。
 (function (global) {
   "use strict";
+  // v494: 稜線の両側の面の法線がこの角度(約20°)より小さい差でつながっていれば
+  // 「滑らかな稜線」(接線エッジ・円筒の継ぎ目など)とみなし、画面には描かない。
+  const EDGE_SMOOTH_COS = Math.cos(20 * Math.PI / 180);
 
   // v459: 1文字ずつ配列に積む方式をやめ、区切りの位置だけを調べて部分文字列を
   // まとめて切り出す(結果は従来と同じ)。大きなSTEPで読み込みが速くなる。
@@ -3505,10 +3509,50 @@
             const ocall = obody.slice("ORIENTED_EDGE(".length, -1);
             const oparts = topLevelSplit(ocall);
             const ecRef = refs(oparts[3])[0];
-            if (ecRef) edgeIds.add(ecRef);
+            if (ecRef) {
+              edgeIds.add(ecRef);
+              // v494: 稜線ごとに、その稜線を使っている面を覚える(稜線が「角(かど)」か、
+              // 面と面が滑らかにつながる「接線・継ぎ目」かを見分けるため)
+              if (!this._edgeFaceOe) this._edgeFaceOe = new Map();
+              let mm = this._edgeFaceOe.get(ecRef);
+              if (!mm) { mm = new Map(); this._edgeFaceOe.set(ecRef, mm); }
+              mm.set(oeRef, faceRef);
+            }
           }
         }
       }
+    }
+
+    // v494: 稜線(EDGE_CURVE)の両側の面が滑らかにつながっている(接線エッジ・円筒の継ぎ目など)
+    // かどうか。faceTris: 面の番号 -> その面の三角形([点,法線,点,法線,点,法線]の並び)。
+    // 両側の面の、稜線の中ほどに一番近い頂点の法線どうしの角度が小さければ「滑らか」。
+    // 片側にしか面が無い・面の三角形が無いなど判定できないときは「角」として扱う(表示する)。
+    edgeIsSmooth(ecRef, pl, faceTris) {
+      const mm = this._edgeFaceOe && this._edgeFaceOe.get(ecRef);
+      if (!mm || mm.size !== 2 || !pl || pl.length < 2) return false;
+      const faces = Array.from(mm.values());
+      if (faces[0] === faces[1]) return true; // 同じ面の継ぎ目(円筒の合わせ目など)
+      let mid;
+      if (pl.length === 2) mid = [(pl[0][0] + pl[1][0]) / 2, (pl[0][1] + pl[1][1]) / 2, (pl[0][2] + pl[1][2]) / 2];
+      else mid = pl[Math.floor(pl.length / 2)];
+      const ns = [];
+      for (const f of faces) {
+        const tris = faceTris.get(f);
+        if (!tris || !tris.length) return false;
+        let best = Infinity, bn = null;
+        for (const tr of tris) {
+          for (let k = 0; k < 6; k += 2) {
+            const v = tr[k];
+            const d = (v[0] - mid[0]) ** 2 + (v[1] - mid[1]) ** 2 + (v[2] - mid[2]) ** 2;
+            if (d < best) { best = d; bn = tr[k + 1]; }
+          }
+        }
+        if (!bn) return false;
+        const L = Math.hypot(bn[0], bn[1], bn[2]) || 1;
+        ns.push([bn[0] / L, bn[1] / L, bn[2] / L]);
+      }
+      // 面の向き(表裏)の揃い方はファイルによって保証されないので、絶対値で比べる
+      return Math.abs(ns[0][0] * ns[1][0] + ns[0][1] * ns[1][1] + ns[0][2] * ns[1][2]) > EDGE_SMOOTH_COS;
     }
 
     collectEdgesAndFacesForAbsr(absrEid) {
@@ -3566,10 +3610,12 @@
       if (this._geomCacheByAbsr.has(absrEid)) return this._geomCacheByAbsr.get(absrEid);
       const [edgeIds, faceIds] = this.collectEdgesAndFacesForAbsr(absrEid);
       const polylines = [];
+      const polylineEdge = []; // v494: 線ごとの稜線の番号(角か滑らかかの判定用)
       for (const eid of edgeIds) {
         const pl = this.edgePolylineLocal(eid);
-        if (pl && pl.length >= 2) polylines.push(pl);
+        if (pl && pl.length >= 2) { polylines.push(pl); polylineEdge.push(eid); }
       }
+      const faceTris = new Map(); // v494: 面ごとの三角形(稜線の判定が終わるまでだけ持つ)
       // v460: 三角形は面ごとに、すぐ数値の並び(1枚=18個:点,法線,点,法線,点,法線)に
       // 詰め替える。三角形ごとの小さな配列を長く持ち続けないので、メモリの整理(GC)が
       // 大幅に軽くなる(値は同じ)。
@@ -3579,6 +3625,7 @@
         let tris = [];
         try { tris = this.triangulateFace(faceRef); } catch (e) { tris = []; }
         if (!tris || !tris.length) continue;
+        faceTris.set(faceRef, tris);
         faceRanges.push(+faceRef, triangles.n / 18, tris.length);
         triangles.ensure(tris.length * 18);
         const A = triangles.a;
@@ -3588,7 +3635,14 @@
         }
         triangles.n = o;
       }
-      const result = [polylines, triangles.a.slice(0, triangles.n), faceRanges];
+      // v494: 稜線ごとに「滑らか(接線・継ぎ目)」なら1。画面には角の稜線だけを描く
+      // (部品どうしの取り合い=パイプとエルボの境目などは角なので表示される)。
+      const smoothFlags = new Uint8Array(polylines.length);
+      for (let i = 0; i < polylines.length; i++) {
+        try { smoothFlags[i] = this.edgeIsSmooth(polylineEdge[i], polylines[i], faceTris) ? 1 : 0; } catch (e) { smoothFlags[i] = 0; }
+      }
+      faceTris.clear();
+      const result = [polylines, triangles.a.slice(0, triangles.n), faceRanges, smoothFlags];
       this._geomCacheByAbsr.set(absrEid, result);
       return result;
     }
@@ -6420,8 +6474,8 @@
           for (let a = 0; a < 3; a++) { if (q[a] < bMin[a]) bMin[a] = q[a]; if (q[a] > bMax[a]) bMax[a] = q[a]; }
         }
       } else if (absrRef) {
-        const [polylinesLocal, trianglesLocal, faceRangesLocal] = model.getLocalGeometry(absrRef);
-        geomJobs.push([polylinesLocal, trianglesLocal, accumT, faceRangesLocal || []]);
+        const [polylinesLocal, trianglesLocal, faceRangesLocal, smoothLocal] = model.getLocalGeometry(absrRef);
+        geomJobs.push([polylinesLocal, trianglesLocal, accumT, faceRangesLocal || [], smoothLocal || null]);
         for (const pl of polylinesLocal) if (pl.length >= 2) segCount += pl.length - 1;
         triCount += trianglesLocal.length / 18; // 1枚=18個(点,法線,点,法線,点,法線)
       }
@@ -6449,13 +6503,17 @@
     const flatSegments = typed ? new Float64Array(nSegVals) : new Array(nSegVals);
     const flatTriangles = typed ? new Float64Array(nTriVals) : new Array(nTriVals);
     const flatNormals = typed ? new Float64Array(nTriVals) : new Array(nTriVals);
+    // v494: 線分ごとに、滑らかな稜線(接線エッジ・継ぎ目)なら1
+    const segSmooth = new Uint8Array(segCount);
     let so = 0, to = 0;
     // v472: 面ごとの三角形の範囲(全体の三角形の番号)。PMIを選んだときに、指示している面を
     // ハイライトするのに使う。[面の番号, 最初の三角形, 三角形の数] の並び。
     const faceRangeList = [];
-    for (const [polylinesLocal, TL, m, FR] of geomJobs) {
+    for (const [polylinesLocal, TL, m, FR, SM] of geomJobs) {
       { const triBase = to / 9; for (let i = 0; i + 2 < FR.length; i += 3) faceRangeList.push(FR[i], FR[i + 1] + triBase, FR[i + 2]); }
-      for (const pl of polylinesLocal) {
+      for (let pli = 0; pli < polylinesLocal.length; pli++) {
+        const pl = polylinesLocal[pli];
+        const smooth = SM && SM[pli] ? 1 : 0;
         const np = pl.length;
         let px = 0, py = 0, pz = 0;
         for (let i = 0; i < np; i++) {
@@ -6470,6 +6528,7 @@
           if (i > 0 && np >= 2) {
             flatSegments[so] = sc(px); flatSegments[so + 1] = sc(py); flatSegments[so + 2] = sc(pz);
             flatSegments[so + 3] = sc(x); flatSegments[so + 4] = sc(y); flatSegments[so + 5] = sc(z);
+            segSmooth[so / 6] = smooth;
             so += 6;
           }
           px = x; py = y; pz = z;
@@ -6513,6 +6572,7 @@
       assemblyOccurrenceCount: edgesChildToParent.length,
       segmentCount: flatSegments.length / 6,
       flatSegments,
+      segSmooth,
       triangleCount: flatTriangles.length / 9,
       flatTriangles,
       flatNormals,
@@ -8335,9 +8395,11 @@
     uniform mat4 uView;
     uniform mat4 uProj;
     uniform float uDepthBias;
+    uniform vec2 uNdcShift; // v494: 線を太く見せるため、画面上で少しずらして重ね描きする量
     void main() {
       gl_Position = uProj * uView * uModel * vec4(aPosition, 1.0);
       gl_Position.z -= uDepthBias * gl_Position.w;
+      gl_Position.xy += uNdcShift * gl_Position.w;
     }
   `;
   const LINE_FS = `
@@ -8391,7 +8453,7 @@
     }
   `;
 
-  let lineProgram, uModelLoc, uViewLoc, uProjLoc, uColorLoc, uDepthBiasLoc, aPositionLoc;
+  let lineProgram, uModelLoc, uViewLoc, uProjLoc, uColorLoc, uDepthBiasLoc, aPositionLoc, uNdcShiftLoc;
   let faceProgram, fuModelLoc, fuViewLoc, fuProjLoc, fuColorLoc, fuLightLoc, fuViewDirLoc, faPositionLoc, faNormalLoc, fuAlphaLoc, faColorLoc, fuUseVColorLoc;
   if (gl) {
     lineProgram = createProgram(LINE_VS, LINE_FS);
@@ -8400,6 +8462,7 @@
     uProjLoc = gl.getUniformLocation(lineProgram, 'uProj');
     uColorLoc = gl.getUniformLocation(lineProgram, 'uColor');
     uDepthBiasLoc = gl.getUniformLocation(lineProgram, 'uDepthBias');
+    uNdcShiftLoc = gl.getUniformLocation(lineProgram, 'uNdcShift');
     aPositionLoc = gl.getAttribLocation(lineProgram, 'aPosition');
 
     faceProgram = createProgram(FACE_VS, FACE_FS);
@@ -8598,7 +8661,8 @@
   // GPUバッファ作成時に消えてしまう生の座標配列を、この変数にも保持して
   // おく(CPU側で最も近いエッジを検索するために使う)。
   let modelEdgeSegments = null;
-  let modelEdgesVisible = false;
+  let modelEdgeSmooth = null; // v494: 線分ごとに、滑らかな稜線(接線エッジ・継ぎ目)なら1
+  let modelEdgesVisible = true; // v494: 角の稜線(部品の境目)を表示する
   let modelFaceData = null;
   let modelFaceDataByArea = {};
   let modelOcclusionTris = null;
@@ -8716,8 +8780,22 @@
 
     modelLineData = null;
     modelEdgeSegments = (modelData.flatSegments && modelData.flatSegments.length) ? modelData.flatSegments : null;
+    modelEdgeSmooth = (modelData.segSmooth && modelData.flatSegments && modelData.segSmooth.length * 6 === modelData.flatSegments.length) ? modelData.segSmooth : null;
     if (gl && modelData.flatSegments && modelData.flatSegments.length) {
       const arr = new Float32Array(modelData.flatSegments);
+      // v494: 画面に描く稜線は「角」の稜線だけにする。滑らかにつながる稜線(接線エッジ・
+      // 円筒の継ぎ目)は、線分の両端を同じ点にして長さ0にする(線分の並びと数は変えないので、
+      // 単体表示の範囲[segStart, segEnd)はそのまま使える)。
+      // 共同研究先から「溶接記号を指示している箇所(パイプと90°エルボ)で部品の境界線が
+      // 出ていない」との指摘を受けた対応(v395以降、稜線をまったく描いていなかった)。
+      const SM = modelData.segSmooth;
+      if (SM && SM.length * 6 === arr.length) {
+        for (let i = 0; i < SM.length; i++) {
+          if (!SM[i]) continue;
+          const o = i * 6;
+          arr[o + 3] = arr[o]; arr[o + 4] = arr[o + 1]; arr[o + 5] = arr[o + 2];
+        }
+      }
       const buf = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, buf);
       gl.bufferData(gl.ARRAY_BUFFER, arr, gl.STATIC_DRAW);
@@ -15111,7 +15189,8 @@
     // モデルは常に面で表示し、エッジは表示しない(既定の状態のまま)。
     if (!keepView) {
     modelFacesVisible = true;
-    modelEdgesVisible = false;
+    // v494: 部品どうしの境目(パイプとエルボの取り合いなど)が分かるよう、角の稜線を表示する
+    modelEdgesVisible = true;
     }
     for (const cat of ['dimension', 'note', 'weld']) {
       const count = pmiList.filter((p) => p.category === cat).length;
@@ -15142,6 +15221,23 @@
         label.classList.add('is-off');
         for (const pmi of pmiList) if (pmi.category === cat && markerEls.get(pmi.id)) markerEls.get(pmi.id).style.display = 'none';
       }
+    }
+    // v494: モデルの稜線(部品の境目・角)の表示・非表示
+    if (modelLineData) {
+      const label = document.createElement('label');
+      label.className = 'chip' + (modelEdgesVisible ? '' : ' is-off');
+      label.title = '部品どうしの境目(パイプとエルボの取り合いなど)や角の線を表示します';
+      label.innerHTML =
+        '<input type="checkbox"' + (modelEdgesVisible ? ' checked' : '') + '>' +
+        '<span class="swatch" style="background:#12203D;outline:1px solid #8a96a8"></span>' +
+        '<span>稜線</span>';
+      const checkbox = label.querySelector('input');
+      checkbox.addEventListener('change', () => {
+        modelEdgesVisible = checkbox.checked;
+        label.classList.toggle('is-off', !checkbox.checked);
+        markRenderActive();
+      });
+      chipRow.appendChild(label);
     }
 
     statusEl.textContent = 'PMI ' + pmiList.length + '件 + 実形状 ' + (modelFaceData ? modelData.triangleCount : 0) + '面 (実座標)';
@@ -15536,6 +15632,321 @@
       else { if (dl < bestD2) stack.push(L); if (dr < bestD2) stack.push(R); }
     }
     return best;
+  }
+
+  // ---------- v494: 溶接記号の矢の先(モデル側)を、見ている向きに合わせて選び直す ----------
+  // 共同研究先から「溶接指示の指し方の精度(どの方向から矢印を指すか、裏側を指さないように
+  // する)に工夫があるとわかりやすい」との指摘を受けた対応。
+  // CADに記録された矢の先は1点だけなので、モデルを回すとその点がパイプの裏側に回り込み、
+  // 矢がパイプを横切って見えない裏側を指してしまうことがあった。そこで、
+  //   1) 矢の先に一番近い「角の稜線」をたどって、溶接する継ぎ目の線(パイプとエルボの境目の
+  //      円など)を求める(weldJointLoop)。
+  //   2) 画面を描き直すたびに、継ぎ目の線の上の点のうち、
+  //      ・カメラから見えている(モデルの陰になっていない)
+  //      ・溶接記号の折れ点から矢の先までの線が、モデルの上を横切らない(外側から指す)
+  //      ・CADに記録された元の点に近い(指す方向が不自然に変わらない)
+  //      をできるだけ満たす点を矢の先にする(chooseWeldTip)。
+  //   元の点が見えていて、外側から指せているときは元の点のまま変えない。
+  // 継ぎ目の線は溶接記号を選んだときに溶接記号の色で強調表示する(どこを溶接するか分かるように)。
+
+  // 三角形の木(BVH)を使って、原点から方向dirへ進む光線が tmin〜tmax の間で
+  // 三角形に当たるかどうか(当たればtrue)
+  function rayHitsBvh(tris, ox, oy, oz, dx, dy, dz, tmin, tmax) {
+    const h = getTriBvh(tris);
+    if (!h) return false;
+    const { idx, box, left, right, start, count } = h;
+    const ix = 1 / (Math.abs(dx) > 1e-12 ? dx : 1e-12), iy = 1 / (Math.abs(dy) > 1e-12 ? dy : 1e-12), iz = 1 / (Math.abs(dz) > 1e-12 ? dz : 1e-12);
+    const stack = [0];
+    while (stack.length) {
+      const id = stack.pop();
+      const o = id * 6;
+      let t0 = (box[o] - ox) * ix, t1 = (box[o + 3] - ox) * ix;
+      let lo = Math.min(t0, t1), hi = Math.max(t0, t1);
+      t0 = (box[o + 1] - oy) * iy; t1 = (box[o + 4] - oy) * iy;
+      lo = Math.max(lo, Math.min(t0, t1)); hi = Math.min(hi, Math.max(t0, t1));
+      t0 = (box[o + 2] - oz) * iz; t1 = (box[o + 5] - oz) * iz;
+      lo = Math.max(lo, Math.min(t0, t1)); hi = Math.min(hi, Math.max(t0, t1));
+      if (hi < lo || hi < tmin || lo > tmax) continue;
+      if (left[id] >= 0) { stack.push(left[id], right[id]); continue; }
+      for (let k = start[id], e = start[id] + count[id]; k < e; k++) {
+        const q = idx[k] * 9;
+        const v0x = tris[q], v0y = tris[q + 1], v0z = tris[q + 2];
+        const e1x = tris[q + 3] - v0x, e1y = tris[q + 4] - v0y, e1z = tris[q + 5] - v0z;
+        const e2x = tris[q + 6] - v0x, e2y = tris[q + 7] - v0y, e2z = tris[q + 8] - v0z;
+        const px = dy * e2z - dz * e2y, py = dz * e2x - dx * e2z, pz = dx * e2y - dy * e2x;
+        const det = e1x * px + e1y * py + e1z * pz;
+        if (det > -1e-12 && det < 1e-12) continue;
+        const inv = 1 / det;
+        const tvx = ox - v0x, tvy = oy - v0y, tvz = oz - v0z;
+        const u = (tvx * px + tvy * py + tvz * pz) * inv;
+        if (u < -1e-6 || u > 1 + 1e-6) continue;
+        const qx = tvy * e1z - tvz * e1y, qy = tvz * e1x - tvx * e1z, qz = tvx * e1y - tvy * e1x;
+        const v = (dx * qx + dy * qy + dz * qz) * inv;
+        if (v < -1e-6 || u + v > 1 + 1e-6) continue;
+        const t = (e2x * qx + e2y * qy + e2z * qz) * inv;
+        if (t > tmin && t < tmax) return true;
+      }
+    }
+    return false;
+  }
+
+  // rayHitsBvhと同じ探し方で、一番手前で当たる距離tを返す(当たらなければInfinity)
+  function rayNearestBvh(tris, ox, oy, oz, dx, dy, dz, tmin, tmax) {
+    const h = getTriBvh(tris);
+    if (!h) return Infinity;
+    const { idx, box, left, right, start, count } = h;
+    const ix = 1 / (Math.abs(dx) > 1e-12 ? dx : 1e-12), iy = 1 / (Math.abs(dy) > 1e-12 ? dy : 1e-12), iz = 1 / (Math.abs(dz) > 1e-12 ? dz : 1e-12);
+    let best = tmax;
+    const stack = [0];
+    while (stack.length) {
+      const id = stack.pop();
+      const o = id * 6;
+      let t0 = (box[o] - ox) * ix, t1 = (box[o + 3] - ox) * ix;
+      let lo = Math.min(t0, t1), hi = Math.max(t0, t1);
+      t0 = (box[o + 1] - oy) * iy; t1 = (box[o + 4] - oy) * iy;
+      lo = Math.max(lo, Math.min(t0, t1)); hi = Math.min(hi, Math.max(t0, t1));
+      t0 = (box[o + 2] - oz) * iz; t1 = (box[o + 5] - oz) * iz;
+      lo = Math.max(lo, Math.min(t0, t1)); hi = Math.min(hi, Math.max(t0, t1));
+      if (hi < lo || hi < tmin || lo > best) continue;
+      if (left[id] >= 0) { stack.push(left[id], right[id]); continue; }
+      for (let k = start[id], e = start[id] + count[id]; k < e; k++) {
+        const q = idx[k] * 9;
+        const v0x = tris[q], v0y = tris[q + 1], v0z = tris[q + 2];
+        const e1x = tris[q + 3] - v0x, e1y = tris[q + 4] - v0y, e1z = tris[q + 5] - v0z;
+        const e2x = tris[q + 6] - v0x, e2y = tris[q + 7] - v0y, e2z = tris[q + 8] - v0z;
+        const px = dy * e2z - dz * e2y, py = dz * e2x - dx * e2z, pz = dx * e2y - dy * e2x;
+        const det = e1x * px + e1y * py + e1z * pz;
+        if (det > -1e-12 && det < 1e-12) continue;
+        const inv = 1 / det;
+        const tvx = ox - v0x, tvy = oy - v0y, tvz = oz - v0z;
+        const u = (tvx * px + tvy * py + tvz * pz) * inv;
+        if (u < -1e-6 || u > 1 + 1e-6) continue;
+        const qx = tvy * e1z - tvz * e1y, qy = tvz * e1x - tvx * e1z, qz = tvx * e1y - tvy * e1x;
+        const v = (dx * qx + dy * qy + dz * qz) * inv;
+        if (v < -1e-6 || u + v > 1 + 1e-6) continue;
+        const t = (e2x * qx + e2y * qy + e2z * qz) * inv;
+        if (t > tmin && t < best) best = t;
+      }
+    }
+    return best < tmax ? best : Infinity;
+  }
+
+  const WELD_JOINT_SEARCH_MM = 40;   // 矢の先からこの距離までにある角の稜線を継ぎ目の候補にする
+  const WELD_JOINT_GATHER_MM = 400;  // 継ぎ目の線をたどる範囲(矢の先からの距離)
+  const WELD_JOINT_MAX_PTS = 72;     // 矢の先の候補にする点の数の上限
+  // 溶接記号の矢の先に一番近い角の稜線と、それにつながる稜線(=継ぎ目の線)を求める。
+  // 結果は pmi._weldJoint = { pts: 候補点[[x,y,z]...], segs: 線分の座標の並び, radius } (見つからなければnull)
+  function weldJointLoop(pmi) {
+    const P = pmi._modelAttachmentPoint;
+    const S = modelEdgeSegments;
+    const key = P ? (P[0] + '|' + P[1] + '|' + P[2] + '|' + (S ? S.length : 0)) : '';
+    if (pmi._weldJointKey === key) return pmi._weldJoint;
+    pmi._weldJointKey = key;
+    pmi._weldJoint = null;
+    pmi._weldJointLine = null;
+    if (!P || !S || !S.length) return null;
+    const SM = modelEdgeSmooth;
+    const nSeg = S.length / 6;
+    const G2 = WELD_JOINT_GATHER_MM * WELD_JOINT_GATHER_MM;
+    const local = []; // 範囲内の角の稜線の線分番号
+    let best = -1, bestD2 = WELD_JOINT_SEARCH_MM * WELD_JOINT_SEARCH_MM;
+    for (let i = 0; i < nSeg; i++) {
+      if (SM && SM[i]) continue;
+      const o = i * 6;
+      const ax = S[o], ay = S[o + 1], az = S[o + 2], bx = S[o + 3], by = S[o + 4], bz = S[o + 5];
+      if (ax === bx && ay === by && az === bz) continue;
+      const da = (ax - P[0]) ** 2 + (ay - P[1]) ** 2 + (az - P[2]) ** 2;
+      if (da > G2) continue;
+      local.push(i);
+      // 線分までの距離
+      const ux = bx - ax, uy = by - ay, uz = bz - az;
+      const L2 = ux * ux + uy * uy + uz * uz || 1;
+      let t = ((P[0] - ax) * ux + (P[1] - ay) * uy + (P[2] - az) * uz) / L2;
+      t = t < 0 ? 0 : (t > 1 ? 1 : t);
+      const d2 = (ax + ux * t - P[0]) ** 2 + (ay + uy * t - P[1]) ** 2 + (az + uz * t - P[2]) ** 2;
+      if (d2 < bestD2) { bestD2 = d2; best = i; }
+    }
+    if (best < 0) return null;
+    // 端点を共有する線分をたどって、つながっている稜線(継ぎ目の線)を集める
+    const q = (v) => Math.round(v * 100);
+    const kOf = (o) => q(S[o]) + ',' + q(S[o + 1]) + ',' + q(S[o + 2]);
+    const byPt = new Map();
+    for (const i of local) {
+      for (const o of [i * 6, i * 6 + 3]) {
+        const k = kOf(o);
+        let a = byPt.get(k);
+        if (!a) { a = []; byPt.set(k, a); }
+        a.push(i);
+      }
+    }
+    const got = new Set([best]);
+    const stack = [best];
+    while (stack.length && got.size < 4000) {
+      const i = stack.pop();
+      for (const o of [i * 6, i * 6 + 3]) {
+        const a = byPt.get(kOf(o));
+        if (!a) continue;
+        // 3本以上の稜線が集まる点(角)では、別の稜線へ分かれていかない
+        if (a.length > 2) continue;
+        for (const j of a) if (!got.has(j)) { got.add(j); stack.push(j); }
+      }
+    }
+    const segIdx = Array.from(got).sort((a, b) => a - b);
+    const segs = new Float32Array(segIdx.length * 6);
+    const ptsAll = [];
+    let cx = 0, cy = 0, cz = 0;
+    segIdx.forEach((i, n) => {
+      for (let k = 0; k < 6; k++) segs[n * 6 + k] = S[i * 6 + k];
+      const mx = (S[i * 6] + S[i * 6 + 3]) / 2, my = (S[i * 6 + 1] + S[i * 6 + 4]) / 2, mz = (S[i * 6 + 2] + S[i * 6 + 5]) / 2;
+      ptsAll.push([S[i * 6], S[i * 6 + 1], S[i * 6 + 2]], [mx, my, mz]);
+      cx += mx; cy += my; cz += mz;
+    });
+    cx /= segIdx.length; cy /= segIdx.length; cz /= segIdx.length;
+    let radius = 0;
+    for (const p of ptsAll) radius = Math.max(radius, Math.hypot(p[0] - cx, p[1] - cy, p[2] - cz));
+    // 継ぎ目の線が、相手の部品の中に少しだけ埋もれていることがある(差し込み溶接で、ソケットの
+    // 穴の稜線がパイプの外径よりわずかに小さく作られている等。外からは見えない)。
+    // そこで、継ぎ目の線を含む面の中で、線の外側からモデルへ向かって光線を飛ばし、最初に当たる
+    // 外側の表面の点(=実際に外から見える継ぎ目、溶接の止端)へ寄せる。継ぎ目の面の両側に
+    // 少しずらして試し、元の線に近い方を使う。
+    let nx = 0, ny = 0, nz = 0; // 継ぎ目の線を含む面の法線(Newellの方法)
+    for (let n = 0; n < segIdx.length; n++) {
+      const o = n * 6;
+      const ax = segs[o] - cx, ay = segs[o + 1] - cy, az = segs[o + 2] - cz;
+      const bx = segs[o + 3] - cx, by = segs[o + 4] - cy, bz = segs[o + 5] - cz;
+      nx += ay * bz - az * by; ny += az * bx - ax * bz; nz += ax * by - ay * bx;
+    }
+    const nl = Math.hypot(nx, ny, nz);
+    if (nl > 1e-9 && modelOcclusionTris && modelOcclusionTris.length) {
+      nx /= nl; ny /= nl; nz /= nl;
+      const tris = modelOcclusionTris;
+      const OFF = Math.max(0.3, radius * 0.02);
+      const cache = new Map();
+      const adj = (x, y, z) => {
+        const k = x + ',' + y + ',' + z;
+        if (cache.has(k)) return cache.get(k);
+        let rx = x - cx, ry = y - cy, rz = z - cz;
+        const dn = rx * nx + ry * ny + rz * nz;
+        rx -= dn * nx; ry -= dn * ny; rz -= dn * nz;
+        const r0 = Math.hypot(rx, ry, rz);
+        let res = [x, y, z];
+        if (r0 > 1e-6) {
+          const ux = rx / r0, uy = ry / r0, uz = rz / r0;
+          const out = Math.max(5, r0 * 0.5);
+          let bestErr = Infinity;
+          for (const sgn of [-1, 1]) {
+            const ox = x + nx * OFF * sgn + ux * out, oy = y + ny * OFF * sgn + uy * out, oz = z + nz * OFF * sgn + uz * out;
+            const t = rayNearestBvh(tris, ox, oy, oz, -ux, -uy, -uz, 0, out + r0 * 0.5);
+            if (!Number.isFinite(t)) continue;
+            const hx = ox - ux * t, hy = oy - uy * t, hz = oz - uz * t;
+            const err = Math.abs(out - t); // 元の線からのずれ(半径方向)
+            if (err < bestErr && err < Math.max(2, r0 * 0.25)) { bestErr = err; res = [hx, hy, hz]; }
+          }
+        }
+        cache.set(k, res);
+        return res;
+      };
+      for (let n = 0; n < segIdx.length; n++) {
+        for (const o of [n * 6, n * 6 + 3]) {
+          const q = adj(segs[o], segs[o + 1], segs[o + 2]);
+          segs[o] = q[0]; segs[o + 1] = q[1]; segs[o + 2] = q[2];
+        }
+      }
+      for (let i = 0; i < ptsAll.length; i++) ptsAll[i] = adj(ptsAll[i][0], ptsAll[i][1], ptsAll[i][2]);
+    }
+    const step = Math.max(1, Math.ceil(ptsAll.length / WELD_JOINT_MAX_PTS));
+    const pts = ptsAll.filter((_, i) => i % step === 0);
+    pmi._weldJoint = { pts, segs, radius: Math.max(radius, 1) };
+    return pmi._weldJoint;
+  }
+
+  // 今の向き(mvp)で、溶接記号の矢の先にする点を選ぶ。knee: 溶接記号の折れ点(画面座標)。
+  // 返り値: { local: [x,y,z], screen: {x,y} } (選び直さないときは元の点)
+  function chooseWeldTip(pmi, mvp, kneeX, kneeY) {
+    const orig = pmi._modelAttachmentPoint;
+    if (!orig || !modelOcclusionTris || !modelOcclusionTris.length) return null;
+    const joint = weldJointLoop(pmi);
+    const cw = canvas.clientWidth, ch = canvas.clientHeight;
+    const r = sceneRotation;
+    const ck = [r.x, r.y, r.z, r.w, sceneScale, sceneTranslation.x, sceneTranslation.y, sceneTranslation.z].map((v) => v.toFixed(5)).join(',') +
+      '|' + Math.round(kneeX / 4) + ',' + Math.round(kneeY / 4) + '|' + cw + 'x' + ch + '|' + (joint ? joint.pts.length : 0);
+    if (pmi._weldTipCacheKey === ck && pmi._weldTipLocal) {
+      const sc = project(mvp, pmi._weldTipLocal);
+      if (sc) return { local: pmi._weldTipLocal, screen: sc };
+    }
+    // 画面の点 -> モデル座標(正投影なので、画面の各点を通る光線の向きはどこでも同じ)
+    const A = mvp;
+    const a00 = A[0], a01 = A[4], a02 = A[8], a10 = A[1], a11 = A[5], a12 = A[9], a20 = A[2], a21 = A[6], a22 = A[10];
+    const det = a00 * (a11 * a22 - a12 * a21) - a01 * (a10 * a22 - a12 * a20) + a02 * (a10 * a21 - a11 * a20);
+    if (Math.abs(det) < 1e-20) return null;
+    const inv = [
+      (a11 * a22 - a12 * a21) / det, (a02 * a21 - a01 * a22) / det, (a01 * a12 - a02 * a11) / det,
+      (a12 * a20 - a10 * a22) / det, (a00 * a22 - a02 * a20) / det, (a02 * a10 - a00 * a12) / det,
+      (a10 * a21 - a11 * a20) / det, (a01 * a20 - a00 * a21) / det, (a00 * a11 - a01 * a10) / det,
+    ];
+    const unproj = (nx, ny, nz) => {
+      const x = nx - A[12], y = ny - A[13], z = nz - A[14];
+      return [inv[0] * x + inv[1] * y + inv[2] * z, inv[3] * x + inv[4] * y + inv[5] * z, inv[6] * x + inv[7] * y + inv[8] * z];
+    };
+    const pNear = unproj(0, 0, -1), pFar = unproj(0, 0, 1);
+    let vx = pNear[0] - pFar[0], vy = pNear[1] - pFar[1], vz = pNear[2] - pFar[2]; // カメラへ向かう向き
+    const depthLen = Math.hypot(vx, vy, vz) || 1;
+    vx /= depthLen; vy /= depthLen; vz /= depthLen;
+    const tris = modelOcclusionTris;
+    const NUDGE = 0.5;
+    // 点が見えているか(カメラへ向かう光線が他の面に当たらないか)
+    const visible = (p) => !rayHitsBvh(tris, p[0] + vx * NUDGE, p[1] + vy * NUDGE, p[2] + vz * NUDGE, vx, vy, vz, 1e-6, depthLen);
+    // 画面の点(キャンバス座標)の上にモデルがあるか
+    const coveredAt = (sx, sy) => {
+      const o = unproj((sx / cw) * 2 - 1, 1 - (sy / ch) * 2, 1);
+      return rayHitsBvh(tris, o[0], o[1], o[2], vx, vy, vz, 0, depthLen);
+    };
+    // 折れ点 -> 矢の先 の線が、モデルの上を横切る割合(矢の先のすぐ手前は除く)
+    const crossFrac = (sp) => {
+      const dx = sp.x - kneeX, dy = sp.y - kneeY, L = Math.hypot(dx, dy);
+      if (L < 8) return 0;
+      const tEnd = Math.max(0, 1 - 7 / L);
+      const N = 12;
+      let hit = 0;
+      for (let i = 0; i < N; i++) {
+        const t = tEnd * (i + 0.5) / N;
+        if (coveredAt(kneeX + dx * t, kneeY + dy * t)) hit++;
+      }
+      return hit / N;
+    };
+    const origScreen = project(mvp, orig);
+    if (!origScreen) return null;
+    const origVisible = visible(orig);
+    const origCross = origVisible ? crossFrac(origScreen) : 1;
+    let chosen = { local: orig, screen: origScreen };
+    // 元の点が見えていて、外側から指せていれば、元の点のまま(CADの指示を尊重)
+    if (!(origVisible && origCross <= 0.1) && joint && joint.pts.length) {
+      const R = joint.radius;
+      const prev = pmi._weldTipLocal;
+      const cands = [];
+      for (const p of joint.pts) {
+        const sp = project(mvp, p);
+        if (!sp || !visible(p)) continue;
+        cands.push({ p, sp, kd: Math.hypot(sp.x - kneeX, sp.y - kneeY) });
+      }
+      cands.sort((a, b) => a.kd - b.kd);
+      let bestCost = origVisible ? origCross * 3 : Infinity;
+      for (const c of cands.slice(0, 12)) {
+        const cf = crossFrac(c.sp);
+        const d3 = Math.hypot(c.p[0] - orig[0], c.p[1] - orig[1], c.p[2] - orig[2]) / (2 * R);
+        let cost = cf * 3 + d3 * 0.6;
+        // 前回と同じ点は少し有利にする(回転中に矢の先が細かく行き来しないように)
+        if (prev && Math.hypot(c.p[0] - prev[0], c.p[1] - prev[1], c.p[2] - prev[2]) < R * 0.15) cost -= 0.15;
+        if (cost < bestCost) { bestCost = cost; chosen = { local: c.p, screen: c.sp }; }
+      }
+    }
+    pmi._weldTipLocal = chosen.local;
+    pmi._weldTipCacheKey = ck;
+    return chosen;
+  }
+  // 指示線のモデル側の点(溶接記号は見ている向きに合わせて選び直した点を優先)
+  function leaderModelPoint(pmi) {
+    return (pmi.category === 'weld' && pmi._weldTipLocal) || pmi._modelAttachmentPoint || pmi._lineFarPoint || pmi._markerAnchor || pmi.anchor;
   }
 
   const NOTE_LEADER_MAX_GAP_MM = 20;
@@ -17353,7 +17764,7 @@ pmi._lineFarPoint = null;
       pmi._radialMaxW = Math.max(pmi._radialMaxW || 0, g.w);
       pmi._radialMaxH = Math.max(pmi._radialMaxH || 0, g.h);
       const gc = { w: pmi._radialMaxW, h: pmi._radialMaxH };
-      const oLocal = pmi._modelAttachmentPoint || pmi._lineFarPoint || pmi._markerAnchor || pmi.anchor;
+      const oLocal = leaderModelPoint(pmi); // v494
       const O = (oLocal && project(mvp, oLocal)) || { x: pmi._screen.x, y: pmi._screen.y };
       const places = DIRS.map((d) => {
         const tx = d.x > 1e-6 ? (x1 - C.x) / d.x : (d.x < -1e-6 ? (x0 - C.x) / d.x : Infinity);
@@ -17533,7 +17944,7 @@ pmi._lineFarPoint = null;
       const cur = rectOf(p, p._screen.x, p._screen.y);
       if (!dimRects.some((d) => ov(cur, d))) continue; // 寸法値と重なっていなければ動かさない
       const g = geo.get(p);
-      const oLocal = p._modelAttachmentPoint || p._lineFarPoint || p._markerAnchor || p.anchor;
+      const oLocal = leaderModelPoint(p); // v494
       const O = (oLocal && project(mvp, oLocal)) || { x: p._screen.x + g.offX, y: p._screen.y + g.offY };
       const Pc = { x: p._screen.x + g.offX, y: p._screen.y + g.offY };
       const L0 = Math.max(30, Math.hypot(Pc.x - O.x, Pc.y - O.y));
@@ -18531,6 +18942,10 @@ pmi._lineFarPoint = null;
         gl.uniform1f(uDepthBiasLoc, 0);
       }
       if (modelEdgesVisible) {
+        // v494: 稜線は面の上にぴったり乗っているので、そのままでは面と奥行きが同じになり
+        // 途切れ途切れに見える(Zファイティング)。モデル上で約0.6mmぶんだけ手前に出して描く。
+        // (深度の範囲はNEAR〜FAR、正投影なのでモデル座標の長さ×sceneScaleがそのまま奥行きの差)
+        gl.uniform1f(uDepthBiasLoc, Math.max(0.6 * sceneScale, 0.25) * 2 / (FAR - NEAR));
         if (occView !== 'all' && occSelected >= 0 && occNodes[occSelected] && modelLineData) {
           // v398: 単体表示中は、選択部分の稜線だけ
           const o = occNodes[occSelected];
@@ -18543,6 +18958,41 @@ pmi._lineFarPoint = null;
           }
         } else {
           drawLines(modelLineData, COLOR_MODEL_EDGE);
+        }
+        gl.uniform1f(uDepthBiasLoc, 0);
+      }
+      // v494: 選んだ溶接記号が指している継ぎ目の線(パイプとエルボの境目など)を、溶接記号の色で
+      // 太めに強調する(モデルの陰になる部分は描かない)。
+      if (selectedId && gl) {
+        const selW = pmiList.find((p) => p.id === selectedId);
+        const joint = selW && selW.category === 'weld' ? weldJointLoop(selW) : null;
+        if (joint && joint.segs && joint.segs.length) {
+          if (!selW._weldJointLine || selW._weldJointLine.src !== joint.segs) {
+            if (selW._weldJointLine && selW._weldJointLine.buffer) gl.deleteBuffer(selW._weldJointLine.buffer);
+            const buf = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+            gl.bufferData(gl.ARRAY_BUFFER, joint.segs, gl.STATIC_DRAW);
+            selW._weldJointLine = { buffer: buf, count: joint.segs.length / 3, src: joint.segs };
+          }
+          gl.uniform1f(uDepthBiasLoc, Math.max(1.5 * sceneScale, 0.5) * 2 / (FAR - NEAR));
+          const px = 2 / Math.max(1, canvas.width), py = 2 / Math.max(1, canvas.height);
+          const dpr = window.devicePixelRatio || 1;
+          for (const [sx, sy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            gl.uniform2f(uNdcShiftLoc, sx * px * dpr, sy * py * dpr);
+            drawLines(selW._weldJointLine, COLOR_WELD);
+          }
+          gl.uniform2f(uNdcShiftLoc, 0, 0);
+          // モデルの陰になっている部分も、細く薄く透かして描く(継ぎ目が一周していることが分かるように)
+          gl.depthFunc(gl.GREATER);
+          gl.depthMask(false);
+          gl.enable(gl.BLEND);
+          gl.blendColor(0, 0, 0, 0.4);
+          gl.blendFunc(gl.CONSTANT_ALPHA, gl.ONE_MINUS_CONSTANT_ALPHA);
+          drawLines(selW._weldJointLine, COLOR_WELD);
+          gl.disable(gl.BLEND);
+          gl.depthMask(true);
+          gl.depthFunc(gl.LESS);
+          gl.uniform1f(uDepthBiasLoc, 0);
         }
       }
       // v390: STEP内の部品表は3D空間には描かず、画面右下の固定パネル
@@ -19722,8 +20172,8 @@ pmi._lineFarPoint = null;
           if (!declutterd && !alwaysUseConnectorOnly) { pmi._modelScreenForHit = null; continue; }
           if (pmi._noModelLeader) { pmi._modelScreenForHit = null; continue; } // v374
           // v374: 指示線の始点は、モデル表面へ寄せた点(_modelAttachmentPoint)を優先する。
-          const modelPointLocal = pmi._modelAttachmentPoint || pmi._lineFarPoint || pmi._markerAnchor || pmi.anchor;
-          const modelScreen = modelPointLocal ? project(mvp, modelPointLocal) : null;
+          const modelPointLocal = leaderModelPoint(pmi); // v494
+          let modelScreen = modelPointLocal ? project(mvp, modelPointLocal) : null;
           // v218: handleTap(mvpにアクセスできない別のスコープ)から指示線への
           // 距離判定に使うため、この画面座標をPMIにキャッシュしておく。
           pmi._modelScreenForHit = modelScreen;
@@ -19756,6 +20206,13 @@ pmi._lineFarPoint = null;
               const kfx = parseFloat(weldIconEl.dataset.kneeFx), kfy = parseFloat(weldIconEl.dataset.kneeFy);
               targetX = iconRect.left + iconRect.width * (Number.isFinite(kfx) ? kfx : 13.8 / 80);
               targetY = iconRect.top + iconRect.height * (Number.isFinite(kfy) ? kfy : 33.1 / 54);
+              // v494: 見ている向きに合わせて、矢の先を溶接の継ぎ目の見えている点へ選び直す
+              // (裏側を指さない・モデルを横切らずに外側から指す。chooseWeldTip参照)
+              try {
+                const cr = canvas.getBoundingClientRect();
+                const tip = chooseWeldTip(pmi, mvp, targetX - cr.left, targetY - cr.top);
+                if (tip && tip.screen) { modelScreen = tip.screen; pmi._modelScreenForHit = modelScreen; }
+              } catch (e) { console.warn('chooseWeldTip failed:', e); }
               // v421: JIS Z 3021 4.6.1「矢は，基線に角度をもって連結し」「基線のいずれの端に連結してもよい」。
               // 矢(モデルの指示点→折れ点)が基線の伸びる側へ向かうと基線と重なるので、基線を反対側へ付け替える。
               const dirNow = parseFloat(weldIconEl.dataset.dir);
