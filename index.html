@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v510</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v511</div>
   <!-- v338: 寸法値の位置決めロジック(render()内)が実際に毎フレーム
        計算している値を、画面上でそのまま確認できる簡易デバッグ表示。
        選択中のPMIが寸法のときだけ表示される。開発者ツールを開かなくても
@@ -1310,6 +1310,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v511: 計算を速くしました(表示や配置の結果は変えていません)。モデルを回転させている間の1コマあたりの計算時間を約4割短くしています。①画面の大きさの読み取りを1コマに1回にまとめ、寸法値の位置の読み取りも全部置き終えてから一度に行うようにして、ブラウザの配置計算のやり直しを大幅に減らしました ②照合番号・溶接記号の置き場所の評価で、指示線から遠い寸法線を先に除外し、距離の計算(Math.hypot)をより速い同じ値の計算に置き換えました ③STEPの読み込み(三角形分割)で、点や辺の照合を文字列ではなく数値で行うようにし、読み込みも約1割速くなりました</li>
         <li>v509: v508で、照合番号どうしが重なったままになる場面があった問題を修正しました(例: ②と⑤の丸が重なる)。向きのルール(真横・上)の候補だけでは重なりを避けられないときは、重なっている番号に指示点のまわり全方向の置き場所を候補として加えて解き直し、重ならないことを向きのルールより優先します。組み合わせを探す時間の上限も、候補作りとは別に数えるようにしました。</li>
         <li>v508: 照合番号(バルーン)の置き場所を、1つずつ順に決めるのではなく、表示中の番号全体でまとめて決めるようにしました(先に置いた番号が良い場所を取り、後の番号が重なるのを防ぐ)。向きのルール(真横 / 一番上の品目は上 / 部品の手前で止める / 寸法線を避けてずらす)に合う候補の中から、番号どうしの重なり・指示線の交差も含めて合計が最も良い組み合わせを選びます(計算は1回あたり6ミリ秒以内)。</li>
         <li>v507: 照合番号(バルーン)の丸が寸法線・寸法補助線にかかるときは、かからなくなるまで丸をずらすようにしました(指示線の向きに沿って前後、または直角の向きへ、ずれが少ない方を優先)。ずらした先でも、モデル・ほかの部品・ほかの番号や指示線とは重ならないようにします。</li>
@@ -1418,6 +1419,8 @@
 // 同じ描画コードで扱える。
 (function (global) {
   "use strict";
+  // v511: 形状の読み込みは従来どおりの Math.hypot をそのまま使う(三角形分割の結果を変えないため)
+  const _nativeHypot = Math.__nativeHypot || Math.hypot;
   // v494: 稜線の両側の面の法線がこの角度(約20°)より小さい差でつながっていれば
   // 「滑らかな稜線」(接線エッジ・円筒の継ぎ目など)とみなし、画面には描かない。
   const EDGE_SMOOTH_COS = Math.cos(20 * Math.PI / 180);
@@ -1892,7 +1895,7 @@
       }
       const a0 = angleOf(pStart);
       const a1 = angleOf(pEnd);
-      const fullCircle = Math.hypot(pStart[0]-pEnd[0], pStart[1]-pEnd[1], pStart[2]-pEnd[2]) < 1e-6;
+      const fullCircle = _nativeHypot(pStart[0]-pEnd[0], pStart[1]-pEnd[1], pStart[2]-pEnd[2]) < 1e-6;
 
       if (fullCircle) {
         const pts = [];
@@ -1954,7 +1957,7 @@
       }
       const a0 = angleOf(pStart);
       const a1 = angleOf(pEnd);
-      const fullEllipse = Math.hypot(pStart[0]-pEnd[0], pStart[1]-pEnd[1], pStart[2]-pEnd[2]) < 1e-6;
+      const fullEllipse = _nativeHypot(pStart[0]-pEnd[0], pStart[1]-pEnd[1], pStart[2]-pEnd[2]) < 1e-6;
 
       if (fullEllipse) {
         const pts = [];
@@ -2234,7 +2237,7 @@
         const [majorR, minorR] = radius;
         const lx = vdot(v, x), ly = vdot(v, y), lz = vdot(v, z);
         let u = Math.atan2(ly, lx);
-        const radFromAxis = Math.hypot(lx, ly);
+        const radFromAxis = _nativeHypot(lx, ly);
         let vv = Math.atan2(lz, radFromAxis - majorR);
         if (prevUv) {
           const ur = Math.max(majorR, 1e-6), vr = Math.max(minorR, 1e-6);
@@ -2300,7 +2303,7 @@
         const nx = radialDir[0] * Math.cos(semi) - z[0] * Math.sin(semi);
         const ny = radialDir[1] * Math.cos(semi) - z[1] * Math.sin(semi);
         const nz = radialDir[2] * Math.cos(semi) - z[2] * Math.sin(semi);
-        const nl = Math.hypot(nx, ny, nz) || 1.0;
+        const nl = _nativeHypot(nx, ny, nz) || 1.0;
         return [nx / nl, ny / nl, nz / nl];
       }
       return z;
@@ -2981,7 +2984,7 @@
       // 面の大きさ(許容差の基準)
       let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
       for (const L of loops) for (const q of L) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], q[k]); hi[k] = Math.max(hi[k], q[k]); }
-      const diag = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) || 1;
+      const diag = _nativeHypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) || 1;
       // 展開図へ
       const uvLoops = [];
       for (const L of loops) {
@@ -3049,7 +3052,7 @@
       const curved = isFinite(S.hu) || isFinite(S.hv);
       if (curved) {
         const [ua, ub] = spanOf(nOuter, 0), [va, vb] = spanOf(nOuter, 1);
-        const dN = Math.hypot(ub - ua, vb - va);
+        const dN = _nativeHypot(ub - ua, vb - va);
         let stU = S.analytic ? S.hu * sx : dN / 10, stV = S.analytic ? S.hv * sy : dN / 10;
         if (!isFinite(stU)) stU = Infinity;
         if (!isFinite(stV)) stV = Infinity;
@@ -3074,7 +3077,7 @@
               const ax = r[j][0], ay = r[j][1], bx = r[i][0], by = r[i][1];
               const ex = bx - ax, ey = by - ay, L2 = ex * ex + ey * ey;
               const t = L2 > 0 ? Math.max(0, Math.min(1, ((x - ax) * ex + (y - ay) * ey) / L2)) : 0;
-              const d = Math.hypot(x - ax - ex * t, y - ay - ey * t);
+              const d = _nativeHypot(x - ax - ex * t, y - ay - ey * t);
               if (d < best) best = d;
             }
           }
@@ -3108,7 +3111,8 @@
           T.push([a, b, c]);
         }
         const fixed = new Set();
-        const ek = (a, b) => a < b ? a + "," + b : b + "," + a;
+        const NV = flat.length / 2 + 1; // v511: 辺の名前を文字列でなく数で作る(速い・順番も同じ)
+        const ek = (a, b) => a < b ? a * NV + b : b * NV + a;
         for (const [st, n] of rings) for (let i = 0; i < n; i++) fixed.add(ek(st + i, st + (i + 1) % n));
         const emap = new Map();
         const addE = (ti) => { const [a, b, c] = T[ti]; for (const [p, q] of [[a, b], [b, c], [c, a]]) { const k = ek(p, q); let l = emap.get(k); if (!l) emap.set(k, l = []); l.push(ti); } };
@@ -3125,7 +3129,7 @@
           if (fixed.has(k)) continue;
           const l = emap.get(k);
           if (!l || l.length !== 2) continue;
-          const [p, q] = k.split(",").map(Number);
+          const p = Math.floor(k / NV), q = k - p * NV;
           const t1 = T[l[0]], t2 = T[l[1]];
           const c = t1.find((v) => v !== p && v !== q), d = t2.find((v) => v !== p && v !== q);
           if (c == null || d == null || c === d) continue;
@@ -3148,7 +3152,7 @@
       const out = [];
       const ptCache = new Map();
       const getPN = (u, v) => {
-        const key = u.toFixed(9) + "," + v.toFixed(9);
+        const key = Math.round(u * 1e9) + "," + Math.round(v * 1e9); // v511: toFixedより速い(同じ点は同じキー)
         let e = ptCache.get(key);
         if (!e) {
           const p = S.point(u / sx, v / sy);
@@ -3171,7 +3175,7 @@
           let dev = 0;
           const chk = (u, v, q) => { dev = Math.max(dev, dist(S.point(u / sx, v / sy), q)); };
           // 一番長い辺の中点と重心で調べる
-          const lab = Math.hypot(a[0] - b[0], a[1] - b[1]), lbc = Math.hypot(b[0] - c[0], b[1] - c[1]), lca = Math.hypot(c[0] - a[0], c[1] - a[1]);
+          const lab = _nativeHypot(a[0] - b[0], a[1] - b[1]), lbc = _nativeHypot(b[0] - c[0], b[1] - c[1]), lca = _nativeHypot(c[0] - a[0], c[1] - a[1]);
           if (lab >= lbc && lab >= lca) chk((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, vscale(vadd(pa, pb), 0.5));
           else if (lbc >= lca) chk((b[0] + c[0]) / 2, (b[1] + c[1]) / 2, vscale(vadd(pb, pc), 0.5));
           else chk((c[0] + a[0]) / 2, (c[1] + a[1]) / 2, vscale(vadd(pc, pa), 0.5));
@@ -3198,7 +3202,7 @@
       }
       if (!S.analytic) {
         for (const e of ptCache.values()) {
-          const n = e[1], l = Math.hypot(n[0], n[1], n[2]);
+          const n = e[1], l = _nativeHypot(n[0], n[1], n[2]);
           if (l > 1e-300) { n[0] /= l; n[1] /= l; n[2] /= l; }
         }
       }
@@ -3569,7 +3573,7 @@
           }
         }
         if (!bn) return false;
-        const L = Math.hypot(bn[0], bn[1], bn[2]) || 1;
+        const L = _nativeHypot(bn[0], bn[1], bn[2]) || 1;
         ns.push([bn[0] / L, bn[1] / L, bn[2] / L]);
       }
       // 面の向き(表裏)の揃い方はファイルによって保証されないので、絶対値で比べる
@@ -3670,7 +3674,7 @@
   }
 
   function dist(a, b) {
-    return Math.hypot(a[0]-b[0], a[1]-b[1], a[2]-b[2]);
+    return _nativeHypot(a[0]-b[0], a[1]-b[1], a[2]-b[2]);
   }
 
   // ---------- v487: 面の三角形分割(改良版)で使う共通の関数 ----------
@@ -4895,7 +4899,7 @@
       if (gpts.length) {
         const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
         for (const p of gpts) for (let k = 0; k < 3; k++) { if (p[k] < lo[k]) lo[k] = p[k]; if (p[k] > hi[k]) hi[k] = p[k]; }
-        ext = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]);
+        ext = _nativeHypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]);
       }
       const d2seg = (q, s) => {
         const a = s[0], b = s[1];
@@ -4909,7 +4913,7 @@
       const out = [];
       const N = 10;
       for (const [a, b] of legs) {
-        const L = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+        const L = _nativeHypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
         if (!(L > 1e-9)) continue;
         // 寸法補助線とモデルとの間の、わざと空けてある短いすき間(2mm程度)は埋めない
         if (L < 0.05 * ext) continue;
@@ -5145,7 +5149,7 @@
       let cx = 0, cy = 0, cz = 0;
       for (const p of points) { cx += p[0]; cy += p[1]; cz += p[2]; }
       cx /= points.length; cy /= points.length; cz /= points.length;
-      const dists = points.map((p) => Math.hypot(p[0] - cx, p[1] - cy, p[2] - cz));
+      const dists = points.map((p) => _nativeHypot(p[0] - cx, p[1] - cy, p[2] - cz));
       const meanR = dists.reduce((a, b) => a + b, 0) / dists.length;
       if (meanR < 1e-9) return "box";
       const variance = dists.reduce((a, d) => a + (d - meanR) * (d - meanR), 0) / dists.length;
@@ -5167,7 +5171,7 @@
     // null を返し、囲み線なしの通常のタグ表示にフォールバックする)。
     function reconstructNoteOutline(segs) {
       if (!segs || segs.length < 3) return null;
-      const lens = segs.map(([a, b]) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]));
+      const lens = segs.map(([a, b]) => _nativeHypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]));
       let leaderIdx = 0, maxLen = -1;
       for (let i = 0; i < lens.length; i++) if (lens[i] > maxLen) { maxLen = lens[i]; leaderIdx = i; }
       const outlineSegs = segs.filter((_, i) => i !== leaderIdx);
@@ -5215,7 +5219,7 @@
         mul: (a, k) => [a[0] * k, a[1] * k, a[2] * k],
         dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2],
         cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]],
-        len: (a) => Math.hypot(a[0], a[1], a[2]),
+        len: (a) => _nativeHypot(a[0], a[1], a[2]),
       };
       V.norm = (a) => { const l = V.len(a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
       const dist = (a, b) => V.len(V.sub(a, b));
@@ -5387,8 +5391,8 @@
           const sg = c.segs[0];
           if (sg === leader || sg === refSeg) continue;
           const a = to2(sg[0]), b = to2(sg[1]);
-          const nearK = (q) => Math.hypot(q[0], q[1]) < T;
-          const nearF = (q) => Math.hypot(q[0] - s, q[1]) < T;
+          const nearK = (q) => _nativeHypot(q[0], q[1]) < T;
+          const nearF = (q) => _nativeHypot(q[0] - s, q[1]) < T;
           // ISO 2553 A系の識別線(破線): 基線と平行・すぐ近く・基線とほぼ同じ長さで、折れ点側か尾側の端がそろう
           if (Math.abs(a[1] - b[1]) < 0.01 && Math.abs(a[1]) > 0.015 && Math.abs(a[1]) < 0.25 && Math.abs(a[0] - b[0]) > 0.7 &&
               Math.min(a[0] * s, b[0] * s) > -T && Math.max(a[0] * s, b[0] * s) < 1 + T &&
@@ -5401,9 +5405,9 @@
         } else {
           const pts = [];
           for (const sg of c.segs) { const a = to2(sg[0]), b = to2(sg[1]); if (!pts.length) pts.push(a); pts.push(b); }
-          const ds = pts.map((q) => Math.hypot(q[0], q[1]));
+          const ds = pts.map((q) => _nativeHypot(q[0], q[1]));
           const mean = ds.reduce((x, y) => x + y, 0) / ds.length;
-          const closed = Math.hypot(pts[0][0] - pts[pts.length - 1][0], pts[0][1] - pts[pts.length - 1][1]) < mean * 0.2;
+          const closed = _nativeHypot(pts[0][0] - pts[pts.length - 1][0], pts[0][1] - pts[pts.length - 1][1]) < mean * 0.2;
           if (mean < 0.35 && closed && ds.every((d) => Math.abs(d - mean) < mean * 0.2)) { allAround = mean; continue; }
           symPolys.push(pts);
         }
@@ -5451,7 +5455,7 @@
       const TL = 0.06;
       const itemSide = (it) => { let b = 0; for (const q of it.pts) if (Math.abs(q[1]) > Math.abs(b)) b = q[1]; return Math.abs(b) < TL ? 0 : Math.sign(b); };
       const sides = items.map(itemSide);
-      const touch = (i, j) => ends(items[i]).some((a) => ends(items[j]).some((b) => Math.hypot(a[0] - b[0], a[1] - b[1]) < 0.01));
+      const touch = (i, j) => ends(items[i]).some((a) => ends(items[j]).some((b) => _nativeHypot(a[0] - b[0], a[1] - b[1]) < 0.01));
       for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) {
         if (sides[i] && sides[i] === sides[j] && touch(i, j)) parent[find(i)] = find(j);
       }
@@ -5487,10 +5491,10 @@
           if (segs.length === 3 && segs.some((sg) => onLine(sg[0]) && onLine(sg[1])) && segs.some(isVert)) kind = 'fillet';
           else if (segs.length === 2) {
             const [a, b] = segs;
-            const shared = ends({ pts: a }).find((q) => ends({ pts: b }).some((w) => Math.hypot(q[0] - w[0], q[1] - w[1]) < 0.01));
+            const shared = ends({ pts: a }).find((q) => ends({ pts: b }).some((w) => _nativeHypot(q[0] - w[0], q[1] - w[1]) < 0.01));
             if (shared && onLine(shared)) {
-              const oa = Math.hypot(a[0][0] - shared[0], a[0][1] - shared[1]) < 0.01 ? a[1] : a[0];
-              const ob = Math.hypot(b[0][0] - shared[0], b[0][1] - shared[1]) < 0.01 ? b[1] : b[0];
+              const oa = _nativeHypot(a[0][0] - shared[0], a[0][1] - shared[1]) < 0.01 ? a[1] : a[0];
+              const ob = _nativeHypot(b[0][0] - shared[0], b[0][1] - shared[1]) < 0.01 ? b[1] : b[0];
               if (isVert(a) || isVert(b)) kind = 'bevel';
               else if (Math.sign(oa[0] - shared[0]) !== Math.sign(ob[0] - shared[0])) kind = 'V';
             } else if (isVert(a) && isVert(b)) kind = 'I';
@@ -5751,13 +5755,13 @@
           // 寸法線の判定にも使わない(斜線を寸法線と誤認していた原因)。
           if (category === "dimension" && /直径|[φΦ⌀]/.test(name || "") && parsed && parsed.points.length >= 8) {
             const pa = parsed.points[0], pb = parsed.points[parsed.points.length - 1];
-            if (Math.hypot(pa[0] - pb[0], pa[1] - pb[1], pa[2] - pb[2]) < 1e-4) {
+            if (_nativeHypot(pa[0] - pb[0], pa[1] - pb[1], pa[2] - pb[2]) < 1e-4) {
               let cx = 0, cy = 0, cz = 0;
               for (const q of parsed.points) { cx += q[0]; cy += q[1]; cz += q[2]; }
               const nq = parsed.points.length;
               cx /= nq; cy /= nq; cz /= nq;
               let rr = 0;
-              for (const q of parsed.points) rr += Math.hypot(q[0] - cx, q[1] - cy, q[2] - cz);
+              for (const q of parsed.points) rr += _nativeHypot(q[0] - cx, q[1] - cy, q[2] - cz);
               rr /= nq;
               dimSymbolCircles.push({ c: [cx, cy, cz], r: rr });
               continue;
@@ -5826,8 +5830,8 @@
         for (let li = linesAll.length - 1; li >= 0; li--) {
           const sg = linesAll[li];
           const mx = (sg[0][0] + sg[1][0]) / 2, my = (sg[0][1] + sg[1][1]) / 2, mz = (sg[0][2] + sg[1][2]) / 2;
-          const sl = Math.hypot(sg[0][0] - sg[1][0], sg[0][1] - sg[1][1], sg[0][2] - sg[1][2]);
-          if (dimSymbolCircles.some((ci) => Math.hypot(mx - ci.c[0], my - ci.c[1], mz - ci.c[2]) < ci.r * 0.6 && sl < ci.r * 4.5)) {
+          const sl = _nativeHypot(sg[0][0] - sg[1][0], sg[0][1] - sg[1][1], sg[0][2] - sg[1][2]);
+          if (dimSymbolCircles.some((ci) => _nativeHypot(mx - ci.c[0], my - ci.c[1], mz - ci.c[2]) < ci.r * 0.6 && sl < ci.r * 4.5)) {
             linesAll.splice(li, 1);
           }
         }
@@ -5920,7 +5924,7 @@
             ny += (a[2] - cz) * (b[0] - cx) - (a[0] - cx) * (b[2] - cz);
             nz += (a[0] - cx) * (b[1] - cy) - (a[1] - cy) * (b[0] - cx);
           }
-          const nlen = Math.hypot(nx, ny, nz);
+          const nlen = _nativeHypot(nx, ny, nz);
           if (nlen > 1e-9) {
             nx /= nlen; ny /= nlen; nz /= nlen;
             // 法線に垂直な、互いに直交する面内の2軸(u, v)を1つ作る。
@@ -5929,7 +5933,7 @@
             // u -= (u・n) n として法線成分を除去し、正規化する。
             const dot = ux * nx + uy * ny + uz * nz;
             ux -= dot * nx; uy -= dot * ny; uz -= dot * nz;
-            const ulen = Math.hypot(ux, uy, uz) || 1;
+            const ulen = _nativeHypot(ux, uy, uz) || 1;
             ux /= ulen; uy /= ulen; uz /= ulen;
             // v = n × u
             const vx = ny * uz - nz * uy, vy = nz * ux - nx * uz, vz = nx * uy - ny * ux;
@@ -6075,8 +6079,8 @@
         const na = sa ? parseInt(sa[1], 10) : 999999;
         const nb = sb ? parseInt(sb[1], 10) : 999999;
         if (na !== nb) return na - nb;
-        const da = Math.hypot(...(a.anchor || [0,0,0]).map((v, i) => v - (master.anchor?.[i] || 0)));
-        const db = Math.hypot(...(b.anchor || [0,0,0]).map((v, i) => v - (master.anchor?.[i] || 0)));
+        const da = _nativeHypot(...(a.anchor || [0,0,0]).map((v, i) => v - (master.anchor?.[i] || 0)));
+        const db = _nativeHypot(...(b.anchor || [0,0,0]).map((v, i) => v - (master.anchor?.[i] || 0)));
         return da - db;
       });
 
@@ -6238,7 +6242,7 @@
           let n = axRefs[1] ? model.getDirection(axRefs[1]) : null;
           if (c && Number.isFinite(r)) {
             if (!n) n = [0, 0, 1];
-            const nl = Math.hypot(n[0], n[1], n[2]) || 1;
+            const nl = _nativeHypot(n[0], n[1], n[2]) || 1;
             // 円の広がりは、軸に垂直な方向だけ(各座標軸方向に r*sqrt(1-n^2))
             const e = [0, 1, 2].map((a) => r * Math.sqrt(Math.max(0, 1 - (n[a] / nl) * (n[a] / nl))));
             for (let k = 0; k < 8; k++) pts.push([c[0] + (k & 1 ? e[0] : -e[0]), c[1] + (k & 2 ? e[1] : -e[1]), c[2] + (k & 4 ? e[2] : -e[2])]);
@@ -6811,14 +6815,14 @@
     const POINT_TOL = 0.05, AXIS_TOL = 0.05, ALONG_TOL = 1.0;
     function distPointToLine(p, origin, dir) {
       const v = vsub(p, origin);
-      const dl = Math.hypot(dir[0], dir[1], dir[2]) || 1;
+      const dl = _nativeHypot(dir[0], dir[1], dir[2]) || 1;
       const ux = dir[0] / dl, uy = dir[1] / dl, uz = dir[2] / dl;
       const t = v[0] * ux + v[1] * uy + v[2] * uz;
       const proj = [origin[0] + ux * t, origin[1] + uy * t, origin[2] + uz * t];
-      return { d: Math.hypot(p[0] - proj[0], p[1] - proj[1], p[2] - proj[2]), t };
+      return { d: _nativeHypot(p[0] - proj[0], p[1] - proj[1], p[2] - proj[2]), t };
     }
     function dirsParallel(d1, d2) {
-      const l1 = Math.hypot(d1[0], d1[1], d1[2]) || 1, l2 = Math.hypot(d2[0], d2[1], d2[2]) || 1;
+      const l1 = _nativeHypot(d1[0], d1[1], d1[2]) || 1, l2 = _nativeHypot(d2[0], d2[1], d2[2]) || 1;
       const dot = Math.abs((d1[0] * d2[0] + d1[1] * d2[1] + d1[2] * d2[2]) / (l1 * l2));
       return dot > 0.9999;
     }
@@ -6913,7 +6917,7 @@
     let Du = 0, Dv = 0;
     for (let k = 1; k < cl.length; k++) {
       const a = cl[k].u - cl[k - 1].u, b = cl[k].v - cl[k - 1].v;
-      if (Math.hypot(a, b) > 3 * S) continue; // 別の行・別の欄への飛び
+      if (_nativeHypot(a, b) > 3 * S) continue; // 別の行・別の欄への飛び
       Du += a; Dv += b;
     }
     textReadSignOf.lastVec = [Du, Dv];
@@ -6981,7 +6985,7 @@
       const axr = refs(ents.get(ax));
       const p = nums(axr[0]), n0 = nums(axr[1]);
       if (!p || !n0) return null;
-      const nl = Math.hypot(n0[0], n0[1], n0[2]) || 1;
+      const nl = _nativeHypot(n0[0], n0[1], n0[2]) || 1;
       const n = n0.map((v) => v / nl);
       const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
       const stack = fr.slice(0, -1), seen = new Set();
@@ -7002,7 +7006,7 @@
     const mul = (a, k) => [a[0] * k, a[1] * k, a[2] * k];
     const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
     const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-    const norm = (a) => { const l = Math.hypot(a[0], a[1], a[2]); return l > 1e-12 ? mul(a, 1 / l) : null; };
+    const norm = (a) => { const l = _nativeHypot(a[0], a[1], a[2]); return l > 1e-12 ? mul(a, 1 / l) : null; };
     const r3 = (v) => v.map((x) => Math.round(x * 1000) / 1000);
     // 他の注記の線(公差記入枠など)の上に三角形が乗っているか
     const otherSegs = [];
@@ -7012,7 +7016,7 @@
       const d = sub(b, a), L2 = dot(d, d);
       if (L2 < 1e-12) return false;
       const t = Math.max(0, Math.min(1, dot(sub(pt, a), d) / L2));
-      return Math.hypot(...sub(add(a, mul(d, t)), pt)) < tol;
+      return _nativeHypot(...sub(add(a, mul(d, t)), pt)) < tol;
     }); if (hit && !pmi.datumAttachedToFrame) pmi.datumAttachedToFrame = hit.p.name; return !!hit; };
     const occIdOf = (p) => +String(p.id || '').replace(/^\D*/, '');
     const faceTokenOf = (name) => { const m = String(name || '').match(/@([^@()]+?)\s*(?:\([^()]*\))?\s*(?:-\d+)?\s*$/); return m ? m[1] : null; }; // v487: 末尾の「-2」等の連番も許す
@@ -7026,7 +7030,7 @@
       const vert = [];
       for (const sg of (fcf.lines || [])) {
         if (!sg || sg.length !== 2) continue;
-        const d = sub(sg[1], sg[0]), L = Math.hypot(...d);
+        const d = sub(sg[1], sg[0]), L = _nativeHypot(...d);
         if (L < 1e-6 || Math.abs(dot(d, fv)) / L < 0.995) continue;
         const v0 = Math.min(dot(sg[0], fv), dot(sg[1], fv)), v1 = Math.max(dot(sg[0], fv), dot(sg[1], fv));
         vert.push({ u: (dot(sg[0], fu) + dot(sg[1], fu)) / 2, v0, v1 });
@@ -7093,18 +7097,18 @@
       const segs = pmi.lines.filter((sg) => sg && sg.length === 2);
       const box = [], rest = [];
       for (const sg of segs) {
-        const touches = segs.filter((o) => o !== sg && [o[0], o[1]].some((q) => [sg[0], sg[1]].some((w) => Math.hypot(...sub(q, w)) < 1e-3))).length;
+        const touches = segs.filter((o) => o !== sg && [o[0], o[1]].some((q) => [sg[0], sg[1]].some((w) => _nativeHypot(...sub(q, w)) < 1e-3))).length;
         (touches >= 2 ? box : rest).push(sg);
       }
       if (box.length !== 4 || rest.length !== 1) continue;
       const boxPts = box.flatMap((sg) => [sg[0], sg[1]]);
       const c = mul(boxPts.reduce((acc, q) => add(acc, q), [0, 0, 0]), 1 / boxPts.length);
-      const half = Math.max(...boxPts.map((q) => Math.hypot(...sub(q, c)))) / Math.SQRT2;
+      const half = Math.max(...boxPts.map((q) => _nativeHypot(...sub(q, c)))) / Math.SQRT2;
       const stem = rest[0];
-      const tip = Math.hypot(...sub(stem[0], c)) > Math.hypot(...sub(stem[1], c)) ? stem[0] : stem[1];
+      const tip = _nativeHypot(...sub(stem[0], c)) > _nativeHypot(...sub(stem[1], c)) ? stem[0] : stem[1];
       // 文字枠の外にある三角形 = 記録された三角記号
       const planeN = norm(cross(sub(box[0][1], box[0][0]), sub(box[1][1], box[1][0]))) || face.n;
-      const inBox = (q) => { const d = sub(q, c); const off = sub(d, mul(planeN, dot(d, planeN))); return Math.hypot(...off) <= half * Math.SQRT2 + 1e-3 && Math.max(...box.map((sg) => 0)) === 0 && (() => { const u = norm(sub(box[0][1], box[0][0])), v = norm(cross(planeN, u)); return Math.abs(dot(off, u)) <= half + 1e-3 && Math.abs(dot(off, v)) <= half + 1e-3; })(); };
+      const inBox = (q) => { const d = sub(q, c); const off = sub(d, mul(planeN, dot(d, planeN))); return _nativeHypot(...off) <= half * Math.SQRT2 + 1e-3 && Math.max(...box.map((sg) => 0)) === 0 && (() => { const u = norm(sub(box[0][1], box[0][0])), v = norm(cross(planeN, u)); return Math.abs(dot(off, u)) <= half + 1e-3 && Math.abs(dot(off, v)) <= half + 1e-3; })(); };
       const triOut = pmi.tris.filter((tr) => !inBox(mul(add(add(tr[0], tr[1]), tr[2]), 1 / 3)));
       const triIn = pmi.tris.filter((tr) => inBox(mul(add(add(tr[0], tr[1]), tr[2]), 1 / 3)));
       if (!triOut.length || triOut.length > 4) continue;
@@ -7114,7 +7118,7 @@
       if (attachUnderFrame(pmi, fid, tip, c)) { moved++; continue; }
       // 三角形の大きさ(記録された三角形のまま)
       const tv = triOut.flat();
-      let w = 0; for (const a of tv) for (const b of tv) w = Math.max(w, Math.hypot(...sub(a, b)));
+      let w = 0; for (const a of tv) for (const b of tv) w = Math.max(w, _nativeHypot(...sub(a, b)));
       const h = w * 0.875;
       // 面の向き: 文字枠の側を外側とする
       let n = face.n.slice();
@@ -7134,7 +7138,7 @@
       const boxEdgePt = add(c, mul(toFoot, half / Math.max(1e-6, Math.max(...[norm(sub(box[0][1], box[0][0])), norm(cross(planeN, norm(sub(box[0][1], box[0][0]))))].map((u) => Math.abs(dot(toFoot, u)))))));
       const newLines = box.map((sg) => sg.map((q) => q.slice()));
       newLines.push([r3(boxEdgePt), r3(apex)]);
-      const gap = Math.hypot(...sub(foot, clamped));
+      const gap = _nativeHypot(...sub(foot, clamped));
       if (gap > 1e-3) {
         // 面の延長線(面の端から三角形の少し先まで)
         const dir = norm(sub(foot, clamped));
@@ -7170,7 +7174,7 @@
     const mul = (a, k) => [a[0] * k, a[1] * k, a[2] * k];
     const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
     const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-    const len = (a) => Math.hypot(a[0], a[1], a[2]);
+    const len = (a) => _nativeHypot(a[0], a[1], a[2]);
     const norm = (a) => { const l = len(a); return l > 1e-12 ? mul(a, 1 / l) : null; };
     const r3 = (v) => v.map((x) => Math.round(x * 1000) / 1000);
     // 形体 → 面
@@ -7744,6 +7748,23 @@
 
 </script>
 <script>
+// v511(高速化): Math.hypot はブラウザ内部の処理が重く(平方根の約4倍の時間)、PMIの配置計算・
+// 描画のたびに何百万回も呼ばれていた。2〜3個の数のときは √(a²+b²(+c²)) で同じ値を求める
+// (極端に大きい・小さい値のときだけ元の Math.hypot を使い、桁あふれを防ぐ)。
+(function () {
+  if (Math.__fastHypot) return;
+  const h = Math.hypot;
+  Math.__nativeHypot = h;
+  Math.hypot = function (a, b, c) {
+    const n = arguments.length;
+    let r;
+    if (n === 2) r = Math.sqrt(a * a + b * b);
+    else if (n === 3) r = Math.sqrt(a * a + b * b + c * c);
+    else return h.apply(Math, arguments);
+    return (r > 1e-150 && r < 1e150) ? r : (n === 2 ? h(a, b) : h(a, b, c));
+  };
+  Math.__fastHypot = true;
+})();
 (function () {
   "use strict";
   // ---------- v414: フォルダ(複数のSTEP)の読み込み ----------
@@ -8380,6 +8401,21 @@
 
   // ---------- WebGL setup ----------
   const canvas = document.getElementById('glcanvas');
+  // v511(高速化): canvasの大きさ・位置(clientWidth/clientHeight/getBoundingClientRect)は
+  // 読むたびにブラウザがレイアウト(配置計算)をやり直すことがあり、描画1フレームの中で
+  // PMIの数だけ何百回も読むと、それだけで処理が大きく遅くなっていた(特にiPad)。
+  // canvasは画面いっぱい(inset:0)に固定で、1フレームの途中で大きさが変わることはないので、
+  // 描画中(render()の実行中)だけは、そのフレームで最初に読んだ値を使い回す。
+  let _cvCache = null, _cvCacheOn = false;
+  function cvSize() {
+    if (!_cvCacheOn) return { w: canvas.clientWidth, h: canvas.clientHeight };
+    if (!_cvCache) {
+      const r = canvas.getBoundingClientRect();
+      _cvCache = { w: canvas.clientWidth, h: canvas.clientHeight, rect: r };
+    }
+    return _cvCache;
+  }
+  function cvRect() { return _cvCacheOn ? cvSize().rect : canvas.getBoundingClientRect(); }
   const gl = canvas.getContext('webgl', { antialias: true, alpha: false });
   const statusEl = document.getElementById('sourceLabel');
 
@@ -9046,7 +9082,7 @@
     if (!dock || dock.hidden) return null;
     const r = dock.getBoundingClientRect();
     if (!(r.width > 0 && r.height > 0)) return null;
-    const cr = canvas.getBoundingClientRect();
+    const cr = cvRect();
     return { x0: r.left - cr.left, y0: r.top - cr.top, x1: r.right - cr.left, y1: r.bottom - cr.top };
   }
   // v498: 「拡大」で開いた部品表パネル(#bomDrawer)の範囲(キャンバス基準のpx)と、画面のどちら側に
@@ -9056,14 +9092,14 @@
     if (!el || el.hidden) return null;
     const r = el.getBoundingClientRect();
     if (!(r.width > 0 && r.height > 0)) return null;
-    const cr = canvas.getBoundingClientRect();
+    const cr = cvRect();
     const rect = { x0: r.left - cr.left, y0: r.top - cr.top, x1: r.right - cr.left, y1: r.bottom - cr.top };
     rect.side = (rect.x0 <= 2 && rect.y0 > cr.height * 0.2) ? 'bottom' : 'right';
     return rect;
   }
   // モデルを収める範囲(キャンバス基準のpx)。リボンの下で、部品表と重ならない長方形。
   function getModelViewRect() {
-    const cw = canvas.clientWidth || 1, ch = canvas.clientHeight || 1;
+    const cw = cvSize().w || 1, ch = cvSize().h || 1;
     const top = Math.min(ch - 1, getRibbonHeightPx());
     const full = { x0: 0, y0: top, x1: cw, y1: ch };
     // v498: 部品表を「拡大」して開いているときは、そのパネルと重ならない側(左側、縦長の画面では上側)に
@@ -9080,7 +9116,7 @@
     // 重なっていた。パネルの「右側」と「下側」の2つの長方形のうち、モデルを大きく表示できる方
     // (短い辺が長い方)を使う(どちらも極端に狭いときだけ、これまでどおり考慮しない)。
     if (occEl && !occEl.hidden && !occEl.classList.contains('is-folded')) {
-      const pr = occEl.getBoundingClientRect(), cr = canvas.getBoundingClientRect();
+      const pr = occEl.getBoundingClientRect(), cr = cvRect();
       const px1 = pr.right - cr.left + 8, py1 = pr.bottom - cr.top + 8;
       const right = { x0: px1, y0: full.y0, x1: full.x1, y1: full.y1 };
       const below = { x0: full.x0, y0: Math.max(full.y0, py1), x1: full.x1, y1: full.y1 };
@@ -9094,7 +9130,7 @@
     // モデルを置かない(部品表の上側の長方形が一覧の下まで広がらないようにする)。
     const pmiDrawerEl = document.getElementById('pmiDrawer');
     if (pmiDrawerEl && !pmiDrawerEl.hidden) {
-      const dl = pmiDrawerEl.getBoundingClientRect().left - canvas.getBoundingClientRect().left - PTABLE_DOCK_GAP_PX;
+      const dl = pmiDrawerEl.getBoundingClientRect().left - cvRect().left - PTABLE_DOCK_GAP_PX;
       if (dl > full.x0 + 1) full.x1 = Math.min(full.x1, dl);
     }
     const above = { x0: full.x0, y0: full.y0, x1: full.x1, y1: Math.max(full.y0 + 1, d.y0 - PTABLE_DOCK_GAP_PX) };
@@ -9106,7 +9142,7 @@
   // 合わせた)だが、実際には平行移動量(世界座標)。正投影なので、
   // 1px = 2*ORTHO_HALF_HEIGHT/ch(縦横共通)で換算できる。
   function getRibbonFraming() {
-    const cw = canvas.clientWidth || 1, ch = canvas.clientHeight || 1;
+    const cw = cvSize().w || 1, ch = cvSize().h || 1;
     const r = getModelViewRect();
     // 縦方向の基準(visibleHalfHeight)に掛ける比率。範囲が縦長のときは
     // 横幅の方が狭いので、横幅側で制限する。
@@ -10073,7 +10109,7 @@
     keepModelInView(); // v410
   }
   function applyPan(dx, dy) {
-    const worldPerPixel = (2 * CAMERA_DIST * Math.tan(VFOV / 2)) / Math.max(canvas.clientHeight, 1);
+    const worldPerPixel = (2 * CAMERA_DIST * Math.tan(VFOV / 2)) / Math.max(cvSize().h, 1);
     sceneTranslation = {
       x: sceneTranslation.x - dx * worldPerPixel,
       y: sceneTranslation.y + dy * worldPerPixel,
@@ -10156,7 +10192,7 @@
     // v410: 上の計算はキャンバスの中心が基準。指定された位置(マウス・指)が基準に
     // なるよう、その差の分だけずらす。
     if (anchorClientX != null && anchorClientY != null) {
-      const rect = canvas.getBoundingClientRect();
+      const rect = cvRect();
       const ax = anchorClientX - rect.left, ay = anchorClientY - rect.top;
       const cx = rect.width / 2, cy = rect.height / 2;
       shiftScreenPx((1 - actualRatio) * (ax - cx), (1 - actualRatio) * (ay - cy));
@@ -10584,7 +10620,7 @@
     return Math.hypot(px - cx, py - cy);
   }
   function handleTap(clientX, clientY) {
-    const rect = canvas.getBoundingClientRect();
+    const rect = cvRect();
     const px = clientX - rect.left, py = clientY - rect.top;
     let best = null, bestDist = 34;
     for (const pmi of pmiList) {
@@ -10626,7 +10662,7 @@
     // v403: 「周りを薄く」では薄い部分もタップで選べる(別のサブアセンブリへ切り替え)
     if (occView === 'solo' && occSelected >= 0) { tFrom = occNodes[occSelected].triStart; tTo = occNodes[occSelected].triEnd; }
     const m = lastMVP;
-    const cw = canvas.clientWidth, ch = canvas.clientHeight;
+    const cw = cvSize().w, ch = cvSize().h;
     // 画面座標 -> NDC
     const nx = (px / cw) * 2 - 1, ny = 1 - (py / ch) * 2;
     let best = -1, bestZ = Infinity;
@@ -14307,7 +14343,7 @@
         };
         if (open) {
           const bd = getBomDrawerRect();
-          const ch = canvas.clientHeight || 1;
+          const ch = cvSize().h || 1;
           if (bd && bd.side === 'bottom' && panel && !panel.classList.contains('is-collapsed') && bd.y0 - getRibbonHeightPx() < ch * 0.3) {
             setRibbon(true);
             bomAutoCollapsedRibbon = true;
@@ -15727,7 +15763,8 @@
 
   // 三角形の木(BVH)を使って、原点から方向dirへ進む光線が tmin〜tmax の間で
   // 三角形に当たるかどうか(当たればtrue)
-  function rayHitsBvh(tris, ox, oy, oz, dx, dy, dz, tmin, tmax) {
+  const RAY_BVH_STACK = new Int32Array(1024);
+  function rayHitsBvhSlow(tris, ox, oy, oz, dx, dy, dz, tmin, tmax) {
     const h = getTriBvh(tris);
     if (!h) return false;
     const { idx, box, left, right, start, count } = h;
@@ -15744,6 +15781,50 @@
       lo = Math.max(lo, Math.min(t0, t1)); hi = Math.min(hi, Math.max(t0, t1));
       if (hi < lo || hi < tmin || lo > tmax) continue;
       if (left[id] >= 0) { stack.push(left[id], right[id]); continue; }
+      for (let k = start[id], e = start[id] + count[id]; k < e; k++) {
+        const q = idx[k] * 9;
+        const v0x = tris[q], v0y = tris[q + 1], v0z = tris[q + 2];
+        const e1x = tris[q + 3] - v0x, e1y = tris[q + 4] - v0y, e1z = tris[q + 5] - v0z;
+        const e2x = tris[q + 6] - v0x, e2y = tris[q + 7] - v0y, e2z = tris[q + 8] - v0z;
+        const px = dy * e2z - dz * e2y, py = dz * e2x - dx * e2z, pz = dx * e2y - dy * e2x;
+        const det = e1x * px + e1y * py + e1z * pz;
+        if (det > -1e-12 && det < 1e-12) continue;
+        const inv = 1 / det;
+        const tvx = ox - v0x, tvy = oy - v0y, tvz = oz - v0z;
+        const u = (tvx * px + tvy * py + tvz * pz) * inv;
+        if (u < -1e-6 || u > 1 + 1e-6) continue;
+        const qx = tvy * e1z - tvz * e1y, qy = tvz * e1x - tvx * e1z, qz = tvx * e1y - tvy * e1x;
+        const v = (dx * qx + dy * qy + dz * qz) * inv;
+        if (v < -1e-6 || u + v > 1 + 1e-6) continue;
+        const t = (e2x * qx + e2y * qy + e2z * qz) * inv;
+        if (t > tmin && t < tmax) return true;
+      }
+    }
+    return false;
+  }
+  function rayHitsBvh(tris, ox, oy, oz, dx, dy, dz, tmin, tmax) {
+    const h = getTriBvh(tris);
+    if (!h) return false;
+    const { idx, box, left, right, start, count } = h;
+    const ix = 1 / (Math.abs(dx) > 1e-12 ? dx : 1e-12), iy = 1 / (Math.abs(dy) > 1e-12 ? dy : 1e-12), iz = 1 / (Math.abs(dz) > 1e-12 ? dz : 1e-12);
+    // v511: 探索用の積み上げ場所は毎回作らず使い回す(呼ばれる回数が多く、メモリ整理の負担になるため)
+    const stack = RAY_BVH_STACK;
+    let sp = 0;
+    stack[sp++] = 0;
+    while (sp > 0) {
+      const id = stack[--sp];
+      const o = id * 6;
+      let t0 = (box[o] - ox) * ix, t1 = (box[o + 3] - ox) * ix;
+      let lo = Math.min(t0, t1), hi = Math.max(t0, t1);
+      t0 = (box[o + 1] - oy) * iy; t1 = (box[o + 4] - oy) * iy;
+      lo = Math.max(lo, Math.min(t0, t1)); hi = Math.min(hi, Math.max(t0, t1));
+      t0 = (box[o + 2] - oz) * iz; t1 = (box[o + 5] - oz) * iz;
+      lo = Math.max(lo, Math.min(t0, t1)); hi = Math.min(hi, Math.max(t0, t1));
+      if (hi < lo || hi < tmin || lo > tmax) continue;
+      if (left[id] >= 0) {
+        if (sp + 2 > stack.length) return rayHitsBvhSlow(tris, ox, oy, oz, dx, dy, dz, tmin, tmax);
+        stack[sp++] = left[id]; stack[sp++] = right[id]; continue;
+      }
       for (let k = start[id], e = start[id] + count[id]; k < e; k++) {
         const q = idx[k] * 9;
         const v0x = tris[q], v0y = tris[q + 1], v0z = tris[q + 2];
@@ -16024,7 +16105,7 @@
   let screenCoverState = null;
   function getScreenCover(mvp) {
     if (!modelOcclusionTris || !modelOcclusionTris.length || !mvp) return null;
-    const cw = canvas.clientWidth, ch = canvas.clientHeight;
+    const cw = cvSize().w, ch = cvSize().h;
     const r = sceneRotation;
     const key = [r.x, r.y, r.z, r.w, sceneScale, sceneTranslation.x, sceneTranslation.y, sceneTranslation.z].map((v) => v.toFixed(5)).join(',') +
       '|' + cw + 'x' + ch + '|' + modelOcclusionTris.length;
@@ -16751,7 +16832,7 @@
     if (!recs.length) return;
     const mvp = currentMvp();
     const vis = recs.filter((p) => isCategoryVisible(p) && !p._farOccluded);
-    const key = Array.from(mvp).map((v) => v.toFixed(4)).join(',') + '|' + vis.map((p) => p.id).join(',') + '|' + canvas.clientWidth + 'x' + canvas.clientHeight;
+    const key = Array.from(mvp).map((v) => v.toFixed(4)).join(',') + '|' + vis.map((p) => p.id).join(',') + '|' + cvSize().w + 'x' + cvSize().h;
     const now = performance.now();
     if (key !== recDeclutterKey) { recDeclutterKey = key; recDeclutterChangedAt = now; markRenderActive(400); return; }
     if (key === recDeclutterDoneKey || now - recDeclutterChangedAt < 180) { if (key !== recDeclutterDoneKey) markRenderActive(250); return; }
@@ -17830,6 +17911,7 @@ pmi._lineFarPoint = null;
   // --ribbon-height(#glcanvasのclip-pathで使用)を更新する。閉じている
   // ときはヘッダー自体の高さ(トグルボタン分)だけを除外する。
   let lastViewClip = null; // v396
+  let lastRibbonHeightVal = null; // v511
   function updateRibbonHeightVar() {
     const header = document.querySelector('header.toolbar');
     const ribbon = document.getElementById('filterPanel');
@@ -17837,14 +17919,15 @@ pmi._lineFarPoint = null;
     if (ribbon && !ribbon.classList.contains('is-collapsed')) {
       bottom = Math.max(bottom, ribbon.getBoundingClientRect().bottom);
     }
-    document.documentElement.style.setProperty('--ribbon-height', Math.max(0, bottom) + 'px');
+    const rhVal = Math.max(0, bottom) + 'px';
+    if (rhVal !== lastRibbonHeightVal) { lastRibbonHeightVal = rhVal; document.documentElement.style.setProperty('--ribbon-height', rhVal); } // v511: 変わったときだけ書く
     // v396: 部品表パネルが表示されている間は、リボンと同じく、その範囲にも
     // 3Dの絵を描かない(右下の角を切り欠いたL字形で切り取る)。
     const top = Math.max(0, bottom);
     const d = getPartsTableDockRect();
     let clip = '';
     if (d && d.y1 > top) {
-      const cw = canvas.clientWidth, ch = canvas.clientHeight, g = PTABLE_DOCK_GAP_PX;
+      const cw = cvSize().w, ch = cvSize().h, g = PTABLE_DOCK_GAP_PX;
       const bx = Math.max(0, d.x0 - g), by = Math.max(top, d.y0 - g);
       clip = 'polygon(0px ' + top + 'px, ' + cw + 'px ' + top + 'px, ' + cw + 'px ' + by + 'px, ' +
         bx + 'px ' + by + 'px, ' + bx + 'px ' + ch + 'px, 0px ' + ch + 'px)';
@@ -17872,7 +17955,7 @@ pmi._lineFarPoint = null;
     const clip = transformPoint(mvp, { x: p[0], y: p[1], z: p[2] });
     if (clip.w <= 0.0001) return null;
     const ndcX = clip.x / clip.w, ndcY = clip.y / clip.w;
-    const cw = canvas.clientWidth, ch = canvas.clientHeight;
+    const cw = cvSize().w, ch = cvSize().h;
     return { x: (ndcX * 0.5 + 0.5) * cw, y: (1 - (ndcY * 0.5 + 0.5)) * ch, depth: clip.w };
   }
 
@@ -17923,7 +18006,7 @@ pmi._lineFarPoint = null;
     if (modelOcclusionTris && modelOcclusionTris.length) {
       const nV = modelOcclusionTris.length / 3;
       const step = Math.max(1, Math.floor(nV / RADIAL_MODEL_SAMPLE_MAX));
-      const m = mvp, cw = canvas.clientWidth, ch = canvas.clientHeight, T = modelOcclusionTris;
+      const m = mvp, cw = cvSize().w, ch = cvSize().h, T = modelOcclusionTris;
       for (let v = 0; v < nV; v += step) {
         const X = T[v * 3], Y = T[v * 3 + 1], Z = T[v * 3 + 2];
         const w = m[3] * X + m[7] * Y + m[11] * Z + m[15];
@@ -18327,10 +18410,22 @@ pmi._lineFarPoint = null;
       const usable = L - 10;
       if (usable < 6 || !dimSegs.length) return 0;
       const N = Math.max(4, Math.min(60, Math.ceil(usable / 6)));
+      // v511: 指示線の範囲(+3.5px)と重ならない寸法の線は、どの点からも3.5px以内に
+      // なり得ないので最初に除く(結果は同じで、調べる組み合わせが大幅に減る)
+      const ux = usable / L;
+      const lx0 = Math.min(from.x, from.x + dx * ux) - 3.5, lx1 = Math.max(from.x, from.x + dx * ux) + 3.5;
+      const ly0 = Math.min(from.y, from.y + dy * ux) - 3.5, ly1 = Math.max(from.y, from.y + dy * ux) + 3.5;
+      const segsNear = [];
+      for (const sg of dimSegs) {
+        const c = sg[0], d = sg[1];
+        if (Math.max(c.x, d.x) < lx0 || Math.min(c.x, d.x) > lx1 || Math.max(c.y, d.y) < ly0 || Math.min(c.y, d.y) > ly1) continue;
+        segsNear.push(sg);
+      }
+      if (!segsNear.length) return 0;
       let near = 0;
       for (let i = 0; i < N; i++) {
         const t = (usable * (i + 0.5) / N) / L, x = from.x + dx * t, y = from.y + dy * t;
-        for (const [c, d] of dimSegs) {
+        for (const [c, d] of segsNear) {
           const ex = d.x - c.x, ey = d.y - c.y, ll = ex * ex + ey * ey;
           let u = ll > 1e-9 ? ((x - c.x) * ex + (y - c.y) * ey) / ll : 0;
           u = Math.max(0, Math.min(1, u));
@@ -18339,7 +18434,7 @@ pmi._lineFarPoint = null;
       }
       return near / N;
     };
-    const cw = canvas.clientWidth, ch = canvas.clientHeight;
+    const cw = cvSize().w, ch = cvSize().h;
     // 記号を置けない場所(リボンの下に隠れる範囲・部品表パネル・サブアセンブリ選択パネル)。
     // ここに置くと後の処理で押し戻され、また矢がモデルを横切ってしまうため、最初から避ける。
     const ribbonBottom = getRibbonHeightPx();
@@ -18347,7 +18442,7 @@ pmi._lineFarPoint = null;
     { const d = getPartsTableDockRect(); if (d) banned.push({ x0: d.x0 - PTABLE_DOCK_GAP_PX, y0: d.y0 - PTABLE_DOCK_GAP_PX, x1: d.x1, y1: d.y1 }); }
     { const b = getBomDrawerRect(); if (b) banned.push({ x0: b.x0 - PTABLE_DOCK_GAP_PX, y0: b.y0 - PTABLE_DOCK_GAP_PX, x1: b.x1, y1: b.y1 }); } // v498
     { const el = document.getElementById('occPanel');
-      if (el && !el.hidden) { const r = el.getBoundingClientRect(), cr = canvas.getBoundingClientRect(); banned.push({ x0: r.left - cr.left, y0: r.top - cr.top, x1: r.right - cr.left + 8, y1: r.bottom - cr.top + 8 }); } }
+      if (el && !el.hidden) { const r = el.getBoundingClientRect(), cr = cvRect(); banned.push({ x0: r.left - cr.left, y0: r.top - cr.top, x1: r.right - cr.left + 8, y1: r.bottom - cr.top + 8 }); } }
     const geo = new Map();
     const rectAt = (p, cx, cy) => { const g = geo.get(p); return { x0: cx - g.w / 2, x1: cx + g.w / 2, y0: cy - g.h / 2, y1: cy + g.h / 2 }; };
     const others = allScreenPmis.filter((p) => p._screen && (p.category === 'weld' || p.category === 'note' || p.category === 'dimension'));
@@ -18434,7 +18529,7 @@ pmi._lineFarPoint = null;
         const bset = new Set(balloons);
         // 動かないもの(照合番号以外)の範囲と指示線
         const sRects = [], sLeaders = [];
-        const cr0 = canvas.getBoundingClientRect();
+        const cr0 = cvRect();
         for (const q of others) {
           if (bset.has(q)) continue;
           if (q.category === 'dimension') {
@@ -18725,7 +18820,7 @@ pmi._lineFarPoint = null;
           let r = q._dimFinalRect;
           if (!r) { const tg = el.querySelector('.pmi-tag'); if (tg) { const br = tg.getBoundingClientRect(); if (br.width > 0 && br.height > 0) r = br; } }
           if (!r) continue;
-          const cr0 = canvas.getBoundingClientRect();
+          const cr0 = cvRect();
           otherRects.push({ x0: r.left - cr0.left, x1: r.right - cr0.left, y0: r.top - cr0.top, y1: r.bottom - cr0.top });
           continue;
         }
@@ -18901,8 +18996,8 @@ pmi._lineFarPoint = null;
 
   const DIM_TEXT_CLEAR_MARGIN_PX = 5;
   function resolveTagOverlapsWithDimensionText(allScreenPmis, mvp) {
-    const cr = canvas.getBoundingClientRect();
-    const cw = canvas.clientWidth, ch = canvas.clientHeight;
+    const cr = cvRect();
+    const cw = cvSize().w, ch = cvSize().h;
     const M = DIM_TEXT_CLEAR_MARGIN_PX;
     const dimRects = [];
     for (const dp of allScreenPmis) {
@@ -19095,7 +19190,7 @@ pmi._lineFarPoint = null;
     // 調整中は、画面中央に「指の位置」と「照準」を数秒だけ表示して距離を確認できるようにする
     let previewTimer = null, previewFinger = null;
     const preview = () => {
-      const cr = canvas.getBoundingClientRect();
+      const cr = cvRect();
       // v387: 距離を長くしても照準が画面内に収まるよう、指の位置を画面の下寄りにする
       const fx = cr.left + cr.width / 2, fy = cr.top + cr.height * 0.85;
       if (!previewFinger) {
@@ -19548,7 +19643,13 @@ pmi._lineFarPoint = null;
     }
     if (animating) markRenderActive(120);
   }
+  let viewportBgRgb = null; // v511
   function render() {
+    // v511: 描画中だけcanvasの大きさを使い回す(cvSize()参照)
+    _cvCache = null; _cvCacheOn = true;
+    try { renderFrame(); } finally { _cvCacheOn = false; _cvCache = null; }
+  }
+  function renderFrame() {
     restorePmiGhosts();
     if (!pmiGeometryDirty && performance.now() > renderActiveUntil && performance.now() > declutterSettleUntil) {
       requestAnimationFrame(render);
@@ -19868,8 +19969,11 @@ pmi._lineFarPoint = null;
     if (gl) {
       resizeCanvasToDisplaySize();
       gl.viewport(0, 0, canvas.width, canvas.height);
-      const bg = getComputedStyle(document.documentElement).getPropertyValue('--viewport-bg').trim() || '#0E1A17';
-      const rgb = hexToRgb01(bg.startsWith('#') ? bg : '#0e1a17');
+      if (!viewportBgRgb) { // v511: 背景色は固定なので最初の1回だけ読む
+        const bg = getComputedStyle(document.documentElement).getPropertyValue('--viewport-bg').trim() || '#0E1A17';
+        viewportBgRgb = hexToRgb01(bg.startsWith('#') ? bg : '#0e1a17');
+      }
+      const rgb = viewportBgRgb;
       gl.clearColor(rgb[0], rgb[1], rgb[2], 1);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       gl.enable(gl.DEPTH_TEST);
@@ -20422,7 +20526,7 @@ pmi._lineFarPoint = null;
         // 引き続き使うが、マーカー位置には使わない)。同じ1つの値を両方が
         // 参照するだけなので、ズレの生じようがない。
         const s = project(mvp, posLocal);
-        if (!s || s.x < -40 || s.x > canvas.clientWidth + 40 || s.y < -40 || s.y > canvas.clientHeight + 40) {
+        if (!s || s.x < -40 || s.x > cvSize().w + 40 || s.y < -40 || s.y > cvSize().h + 40) {
           pmi._screen = null;
           el.style.opacity = '0';
         } else {
@@ -20610,7 +20714,7 @@ pmi._lineFarPoint = null;
                 for (const prev of state.chosen) add += pairCost(prev, c);
                 // 画面の端に寄りすぎる候補は少しだけ不利にする。
                 const margin = 18;
-                const cw = canvas.clientWidth, ch = canvas.clientHeight;
+                const cw = cvSize().w, ch = cvSize().h;
                 if (c.pmi._screen.x < margin || c.pmi._screen.x > cw - margin || c.pmi._screen.y < margin || c.pmi._screen.y > ch - margin) add += 25;
                 next.push({ chosen: state.chosen.concat(c), score: state.score + add, lastIndex: i });
               }
@@ -21165,13 +21269,13 @@ pmi._lineFarPoint = null;
       let occAvoid = null;
       { const el = document.getElementById('occPanel');
         if (el && !el.hidden) {
-          const r = el.getBoundingClientRect(), cr = canvas.getBoundingClientRect();
+          const r = el.getBoundingClientRect(), cr = cvRect();
           occAvoid = { x0: r.left - cr.left, y0: r.top - cr.top, x1: r.right - cr.left, y1: r.bottom - cr.top };
         } }
       const bomAvoid = getBomDrawerRect(); // v498: 拡大した部品表パネルの下にタグが隠れないようにする
       for (const pmi of allScreenPmis) {
         const halfW = (pmi._tagW || 0) / 2, halfH = (pmi._tagH || 0) / 2;
-        const cw = canvas.clientWidth, ch = canvas.clientHeight;
+        const cw = cvSize().w, ch = cvSize().h;
         const minX = halfW + 4;
         const maxX = (bomAvoid && bomAvoid.side === 'right' ? bomAvoid.x0 - PTABLE_DOCK_GAP_PX : cw) - halfW - 4;
         const minY = Math.max(halfH + 4, ribbonBottomPx + halfH + 4);
@@ -21316,7 +21420,7 @@ pmi._lineFarPoint = null;
               // v494: 見ている向きに合わせて、矢の先を溶接の継ぎ目の見えている点へ選び直す
               // (裏側を指さない・モデルを横切らずに外側から指す。chooseWeldTip参照)
               try {
-                const cr = canvas.getBoundingClientRect();
+                const cr = cvRect();
                 const tip = chooseWeldTip(pmi, mvp, targetX - cr.left, targetY - cr.top);
                 if (tip && tip.screen) { modelScreen = tip.screen; pmi._modelScreenForHit = modelScreen; }
               } catch (e) { console.warn('chooseWeldTip failed:', e); }
@@ -21476,6 +21580,7 @@ pmi._lineFarPoint = null;
         const dimDebugPanelEl = document.getElementById('dimDebugPanel');
         if (dimDebugPanelEl) dimDebugPanelEl.style.display = 'none';
         const dimExtSegs = []; // v446: 外側へ出した寸法値の下に延ばす寸法線(画面座標)
+        const dimRectPending = []; // v511: 寸法値の最終範囲は、全部置き終えてからまとめて読む
         for (const pmi of pmiList) {
           if (pmi.category !== 'dimension') continue;
           const marker = markerEls.get(pmi.id);
@@ -21899,7 +22004,9 @@ pmi._lineFarPoint = null;
             const angleRadForOffset = angleDeg * Math.PI / 180;
             const nx = Math.sin(angleRadForOffset);
             const ny = -Math.cos(angleRadForOffset);
-            const tagRect = tagEl.getBoundingClientRect();
+            // v511: 文字の範囲(tagRect)は直径寸法のときしか使わないので、そのときだけ読む
+            // (読むたびに配置計算がやり直しになり、寸法の数だけ重くなっていた)
+            const tagRect = isDiameterForBest ? tagEl.getBoundingClientRect() : null;
             // v326: 「寸法と寸法線が重なっている」との報告を受けた
             // (特に、線がほぼ垂直に近い角度のとき)。height/2ちょうど
             // だと、文字の輪郭のはみ出し(斜体的な傾き、アンチエイリアス
@@ -22046,7 +22153,7 @@ pmi._lineFarPoint = null;
               if (alongHalf * 2 > rawLineLen) {
                 // 外へ出した位置に、ほかの寸法値(直前の描画での位置)が重なるなら反対側を試し、
                 // どちらも重なるなら元の位置(両矢印の間)のままにする。
-                const cr0 = canvas.getBoundingClientRect();
+                const cr0 = cvRect();
                 const hw = Math.abs(dimTextMat.a) * W / 2 + Math.abs(dimTextMat.c) * H / 2;
                 const hh = Math.abs(dimTextMat.b) * W / 2 + Math.abs(dimTextMat.d) * H / 2;
                 const hits = (cx, cy) => {
@@ -22084,10 +22191,9 @@ pmi._lineFarPoint = null;
             // の中でこの処理より前に実行され、その時点の寸法値のDOMは仮の位置に
             // あるため、DOMをその場で読むと実際の表示と10px程度ずれていた。
             // 回避処理ではこの記録(前のフレームの最終位置)を使う。
-            {
-              const fr = tagEl.getBoundingClientRect();
-              pmi._dimFinalRect = (fr.width > 0 && fr.height > 0) ? { left: fr.left, top: fr.top, right: fr.right, bottom: fr.bottom } : null;
-            }
+            // v511: ここで1つずつ読むと寸法ごとに配置計算がやり直しになるため、
+            // すべての寸法値を置き終えてから、まとめて読む(下の dimRectPending)。
+            dimRectPending.push([pmi, tagEl]);
             // v338: 選択中のPMIについて、実際に使われた値をそのまま画面に出す。
             if (pmi.id === selectedId) {
               const panel = document.getElementById('dimDebugPanel');
@@ -22109,6 +22215,10 @@ pmi._lineFarPoint = null;
             }
           }
         }
+        for (const [pmi, tagEl] of dimRectPending) {
+          const fr = tagEl.getBoundingClientRect();
+          pmi._dimFinalRect = (fr.width > 0 && fr.height > 0) ? { left: fr.left, top: fr.top, right: fr.right, bottom: fr.bottom } : null;
+        }
         {
           let extSvg = document.getElementById('dimExtLines');
           if (!extSvg) {
@@ -22118,7 +22228,7 @@ pmi._lineFarPoint = null;
             extSvg.setAttribute('style', 'position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:999998;');
             if (ref && ref.parentNode) ref.parentNode.insertBefore(extSvg, ref); else document.body.appendChild(extSvg);
           }
-          const cr = canvas.getBoundingClientRect();
+          const cr = cvRect();
           // WebGLの線(gl.LINES)は実画素で1px幅なので、高解像度の画面でも同じ太さに見えるようにする
           const extW = (1 / Math.min(window.devicePixelRatio || 1, 2)).toFixed(2);
           extSvg.innerHTML = dimExtSegs.map((g) => '<line x1="' + (cr.left + g.x1).toFixed(1) + '" y1="' + (cr.top + g.y1).toFixed(1) +
@@ -22217,7 +22327,7 @@ pmi._lineFarPoint = null;
         const symOff = posOffsets.get(pmi.id) || zeroOffset();
         const endOff = lineEndOffsets.get(pmi.id) || zeroOffset();
         const s = project(mvp, addOffsetArr(pmi._lineNearPoint, sumOffsets(symOff, endOff)));
-        if (!s || s.x < -40 || s.x > canvas.clientWidth + 40 || s.y < -40 || s.y > canvas.clientHeight + 40) {
+        if (!s || s.x < -40 || s.x > cvSize().w + 40 || s.y < -40 || s.y > cvSize().h + 40) {
           lh.style.opacity = '0';
         } else {
           lh.style.opacity = '1';
@@ -22241,7 +22351,7 @@ pmi._lineFarPoint = null;
         const off = posOffsets.get(pmi.id);
         const posLocal = off ? addOffsetArr(anchorLocal, off) : anchorLocal;
         const s = project(mvp, posLocal);
-        if (!s || s.x < -40 || s.x > canvas.clientWidth + 40 || s.y < -40 || s.y > canvas.clientHeight + 40) {
+        if (!s || s.x < -40 || s.x > cvSize().w + 40 || s.y < -40 || s.y > cvSize().h + 40) {
           ph.style.opacity = '0';
         } else {
           ph.style.opacity = '1';
