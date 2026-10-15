@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v527</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v528</div>
   <!-- v338: 寸法値の位置決めロジック(render()内)が実際に毎フレーム
        計算している値を、画面上でそのまま確認できる簡易デバッグ表示。
        選択中のPMIが寸法のときだけ表示される。開発者ツールを開かなくても
@@ -1310,6 +1310,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v528: (あわせて、1コマの描画が重い端末で、表示し始めの注記が薄いまま止まったり、移動の途中で止まって重なったままになる不具合を直しました) 回転を止めたときや小さな揺れを抑えるために前の位置へ残した照合番号・溶接記号が、ほかの番号・記号や指示線、寸法値・寸法線と重なってしまう場合は、前の位置を保たずに重なりを避けた位置へ移すようにしました
         <li>v527: モデルを回転させてPMI(照合番号などの注記・溶接記号・寸法値)の置き場所が変わるとき、パッと飛ばずに約0.2秒でなめらかに移動するようにしました
         <li>v526: 溶接記号の矢の指し方を改善しました。(1) 継ぎ目のうちカメラの方を60°以内で向いている点だけを指し、裏側や輪郭ぎりぎりは指しません(CADの元の点も同じ判定)。(2) 矢が継ぎ目の外側から表面に直角に近い向きで当たる点・置き場所を優先します。(3) 継ぎ目そのものが見えない向きでは、相手の部品の端を指す代わりに溶接記号を出しません(矢の側を変えないため)。(4) 回転中に矢の先があちこち移らないよう、前の点を優先します
         <li>v525: サブアセンブリを選んでいるときも、PMI(寸法・注記・溶接記号)の表示・非表示が切り替わった直後0.7秒はその状態を保つようにしました(通常表示より0.2秒長い)
@@ -20000,7 +20001,8 @@ pmi._lineFarPoint = null;
   function updatePmiFades() {
     const now = performance.now();
     let dt = now - pmiFadeLastT;
-    if (!(dt > 0) || dt > 100) dt = 16;
+    if (!(dt > 0)) dt = 16;
+    if (dt > 100) dt = 100; // v528: 1コマが重い端末でも止まらずに進める
     pmiFadeLastT = now;
     const step = dt / PMI_FADE_MS;
     let animating = false;
@@ -20021,7 +20023,7 @@ pmi._lineFarPoint = null;
       else if (na <= 0) { pmi._fadeShown = false; }
       if (na > 0 && na < 1) animating = true;
     }
-    if (animating) markRenderActive(120);
+    if (animating) markRenderActive(600); // v528: 1コマが重くても途中で描画が止まらないように(旧120ms)
     if (pmiList.some((q) => q._dimHoldShow || q._dimHoldHide)) markRenderActive(DIM_HOLD_MS + 50); // v524: 保持が切れたら描き直す
   }
   let viewportBgRgb = null; // v511
@@ -20037,7 +20039,7 @@ pmi._lineFarPoint = null;
     // 直前まで表示していなかった(または長く更新が無かった)ときは、目標の位置からそのまま始める
     if (!st || (contiguous === false) || (contiguous == null && now - st.t > 300)) { pmi[key] = { x: tx, y: ty, t: now, f: pmiSmoothFrame }; return pmi[key]; }
     if (st.f === pmiSmoothFrame) return st;
-    const dt = Math.min(50, Math.max(1, now - st.t));
+    const dt = Math.min(100, Math.max(1, now - st.t));
     const k = 1 - Math.exp(-dt / PMI_SMOOTH_TAU_MS);
     st.x += (tx - st.x) * k; st.y += (ty - st.y) * k;
     if (Math.hypot(tx - st.x, ty - st.y) < 0.5) { st.x = tx; st.y = ty; } else pmiSmoothMoving = true;
@@ -21742,6 +21744,11 @@ pmi._lineFarPoint = null;
         }
       }
 
+      // v528: 配置の計算結果(そのまま使えば重なりの少ない位置)を覚えておく
+      for (const pmi of allScreenPmis) {
+        if ((pmi.category === 'note' || pmi.category === 'weld') && !pmi.asRecorded && pmi._screen) pmi._rawLayoutPos = { x: pmi._screen.x, y: pmi._screen.y };
+        else pmi._rawLayoutPos = null;
+      }
       if (noteHoverFreeze) {
         for (const pmi of allScreenPmis) {
           const f = noteHoverFreeze.get(pmi.id);
@@ -21772,7 +21779,7 @@ pmi._lineFarPoint = null;
             else {
               const pd = pmi._notePend;
               if (pd && Math.hypot(ndx - pd.dx, ndy - pd.dy) < NOTE_JITTER_PX) pmi._notePend = null; // 2コマ続いた → 移す
-              else { pmi._notePend = { dx: ndx, dy: ndy }; keep = true; markRenderActive(150); }
+              else { pmi._notePend = { dx: ndx, dy: ndy }; keep = true; markRenderActive(600); declutterSettleUntil = Math.max(declutterSettleUntil, performance.now() + 600); }
             }
           }
           if (keep) {
@@ -21783,6 +21790,73 @@ pmi._lineFarPoint = null;
       }
       { const shown = new Set(allScreenPmis);
         for (const pmi of pmiList) pmi._noteJitterValid = shown.has(pmi); }
+      // v528: 「止めた位置のまま保つ」「小さな揺れは無視する」(v515〜v517)で前の位置に残したことで、
+      // ほかの照合番号・溶接記号や寸法と重なってしまった場合は、前の位置を保つのをやめて、
+      // 配置の計算結果(重なりを避けた位置)へ移す。重なりの数は、番号・記号どうしの重なり、
+      // 指示線がほかの番号・記号を通る、指示線どうしの交差、番号・記号が寸法値・寸法線に
+      // かかる、の合計で比べる。
+      try {
+        const movers = allScreenPmis.filter((p) => p._rawLayoutPos && p._screen);
+        if (movers.length) {
+          const geoC = new Map(movers.map((p) => [p, measureTagCenterOffset(p)]));
+          const crC = cvRect();
+          const dimRs = [], dimLs = [];
+          for (const q of allScreenPmis) {
+            if (q.category !== 'dimension' || q._dimWholeHidden || q._dimThinHidden) continue;
+            if (q._dimFinalRect) { const r = dimRectForNoteLayout(q, q._dimFinalRect); dimRs.push({ x0: r.left - crC.left, x1: r.right - crC.left, y0: r.top - crC.top, y1: r.bottom - crC.top }); }
+            try {
+              const g = (q._dimArrowLinePoints && q._dimArrowLinePoints.length === 2) ? jisDimScreenGeometry(mvp, q) : null;
+              if (g && !g.skip) { dimLs.push([g.a, g.b]); for (const e of g.exts) dimLs.push([e.feature, e.over]); }
+            } catch (e) { /* 無視 */ }
+          }
+          const Os = new Map();
+          for (const p of movers) { const oL = leaderModelPoint(p); Os.set(p, oL ? project(mvp, oL) : null); }
+          const shapeAt = (p, pos) => {
+            const g = geoC.get(p);
+            const C = { x: pos.x + g.offX, y: pos.y + g.offY };
+            const r = { x0: C.x - g.w / 2, x1: C.x + g.w / 2, y0: C.y - g.h / 2, y1: C.y + g.h / 2 };
+            const O = Os.get(p);
+            let K = null;
+            if (O) {
+              const dx = O.x - C.x, dy = O.y - C.y;
+              const tx = Math.abs(dx) > 1e-6 ? g.w / 2 / Math.abs(dx) : Infinity, ty = Math.abs(dy) > 1e-6 ? g.h / 2 / Math.abs(dy) : Infinity;
+              const t = Math.min(1, tx, ty);
+              K = { x: C.x + dx * t, y: C.y + dy * t };
+            }
+            return { r, O, K };
+          };
+          const ovR = (a, b, m) => a.x0 - m < b.x1 && b.x0 - m < a.x1 && a.y0 - m < b.y1 && b.y0 - m < a.y1;
+          const segHitsSeg = (a, b, c, d) => segCrossesSeg(a, b, c, d);
+          const conflicts = (p, pos) => {
+            const me = shapeAt(p, pos);
+            let n = 0;
+            for (const q of movers) {
+              if (q === p) continue;
+              const o = shapeAt(q, q._screen);
+              if (ovR(me.r, o.r, 4)) n++;
+              if (me.K && me.O && segTouchesRect(me.K, me.O, o.r, 2)) n++;
+              if (o.K && o.O && segTouchesRect(o.K, o.O, me.r, 2)) n++;
+              if (me.K && me.O && o.K && o.O && segHitsSeg(me.K, me.O, o.K, o.O)) n++;
+            }
+            for (const d of dimRs) if (ovR(me.r, d, 2)) n++;
+            for (const [a, b] of dimLs) if (segTouchesRect(a, b, me.r, 1)) n++;
+            return n;
+          };
+          for (let pass = 0; pass < 2; pass++) {
+            for (const p of movers) {
+              const raw = p._rawLayoutPos;
+              if (Math.hypot(raw.x - p._screen.x, raw.y - p._screen.y) < 1) continue;
+              const cNow = conflicts(p, p._screen);
+              if (cNow === 0) continue;
+              if (conflicts(p, raw) < cNow) {
+                p._screen.x = raw.x; p._screen.y = raw.y;
+                if (p._anchorScreen) { p._noteRelDX = raw.x - p._anchorScreen.x; p._noteRelDY = raw.y - p._anchorScreen.y; p._notePend = null; }
+                if (noteHoverFreeze) noteHoverFreeze.delete(p.id);
+              }
+            }
+          }
+        }
+      } catch (e) { console.warn('重なりの確認に失敗しました', e); }
       // v527: 注記・溶接記号の置き場所の変化をなめらかに(目標位置へ少しずつ近づける)
       pmiSmoothLayoutSeq++;
       for (const pmi of allScreenPmis) {
@@ -21795,7 +21869,7 @@ pmi._lineFarPoint = null;
         pmi._screen.x = A.x + d.x; pmi._screen.y = A.y + d.y;
       }
       // 移動中は、配置の使い回し(キャッシュ)をせず毎コマ描き直す(指示線も一緒に動かすため)
-      if (pmiSmoothMoving) { declutterSettleUntil = Math.max(declutterSettleUntil, performance.now() + 60); markRenderActive(200); }
+      if (pmiSmoothMoving) { declutterSettleUntil = Math.max(declutterSettleUntil, performance.now() + 600); markRenderActive(600); } // v528: 重い端末でも止まらないように
       for (const pmi of allScreenPmis) {
         pmi._declutterDX = pmi._screen.x - pmi._naturalScreenX;
         pmi._declutterDY = pmi._screen.y - pmi._naturalScreenY;
@@ -22691,7 +22765,7 @@ pmi._lineFarPoint = null;
               pmi._smDimOutside = !!outside;
               const d = smoothRel(pmi, '_smDim', markerLeft - baseX, markerTop - baseY);
               markerLeft = baseX + d.x; markerTop = baseY + d.y;
-              if (pmiSmoothMoving) markRenderActive(200);
+              if (pmiSmoothMoving) markRenderActive(600);
             }
             marker.style.left = markerLeft + 'px';
             marker.style.top = markerTop + 'px';
