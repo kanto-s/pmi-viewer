@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v528</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v529</div>
   <!-- v338: 寸法値の位置決めロジック(render()内)が実際に毎フレーム
        計算している値を、画面上でそのまま確認できる簡易デバッグ表示。
        選択中のPMIが寸法のときだけ表示される。開発者ツールを開かなくても
@@ -1310,6 +1310,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v529: 溶接記号の指示線が、指している点の手前でモデル(パイプなど)を貫通しないようにしました。横切る置き場所・矢の先は、横切らないものがある限り選びません(照合番号と同じ扱い)
         <li>v528: (あわせて、1コマの描画が重い端末で、表示し始めの注記が薄いまま止まったり、移動の途中で止まって重なったままになる不具合を直しました) 回転を止めたときや小さな揺れを抑えるために前の位置へ残した照合番号・溶接記号が、ほかの番号・記号や指示線、寸法値・寸法線と重なってしまう場合は、前の位置を保たずに重なりを避けた位置へ移すようにしました
         <li>v527: モデルを回転させてPMI(照合番号などの注記・溶接記号・寸法値)の置き場所が変わるとき、パッと飛ばずに約0.2秒でなめらかに移動するようにしました
         <li>v526: 溶接記号の矢の指し方を改善しました。(1) 継ぎ目のうちカメラの方を60°以内で向いている点だけを指し、裏側や輪郭ぎりぎりは指しません(CADの元の点も同じ判定)。(2) 矢が継ぎ目の外側から表面に直角に近い向きで当たる点・置き場所を優先します。(3) 継ぎ目そのものが見えない向きでは、相手の部品の端を指す代わりに溶接記号を出しません(矢の側を変えないため)。(4) 回転中に矢の先があちこち移らないよう、前の点を優先します
@@ -16366,7 +16367,7 @@
       const f = cover.segFrac(S, c.sp, SKIP);
       const ang = weldApproachBad(c, S);
       const d3 = Math.hypot(c.p[0] - orig[0], c.p[1] - orig[1], c.p[2] - orig[2]) / (2 * R);
-      let cost = f * 3 + ang * 1.6 + d3 * 0.6;
+      let cost = (f > 0 ? 10 + f * 20 : 0) + ang * 1.6 + d3 * 0.6; // v529: モデルを横切る点は、横切らない点がある限り選ばない
       // 回転中に矢の先が継ぎ目の上をあちこち移らないよう、前のコマの点に近いものを有利にする
       if (prevLocal && Math.hypot(c.p[0] - prevLocal[0], c.p[1] - prevLocal[1], c.p[2] - prevLocal[2]) < R * 0.25) cost -= 0.35;
       if (cost < bestCost) { bestCost = cost; best = c; bestFrac = f; bestAng = ang; }
@@ -18272,6 +18273,7 @@ pmi._lineFarPoint = null;
           const ld = leaderFor(P, rect);
           pen += ld.frac * 2400;
           if (pmi.category === 'note' && ld.frac > 0) pen += 1500 + ld.frac * 5000; // v502: 照合番号はほかの部品と重ねない
+          if (pmi.category === 'weld' && ld.frac > 0) pen += 2500 + ld.frac * 6000; // v529: 溶接記号の指示線もモデルを貫通させない
           // v499: 指示線が寸法線・寸法補助線を横切る本数に応じて減点
           { let n = 0; for (const sg of dimSegs) if (segCrossesSeg(ld.O, P, sg[0], sg[1])) { if (++n >= 4) break; } pen += n * 600; }
           if (!bestPlace || pen < bestPlace.pen) bestPlace = { P, rect, pen, O: ld.O };
@@ -19063,7 +19065,7 @@ pmi._lineFarPoint = null;
         for (const [a, b] of otherLeaders) if (segTouchesRect(a, b, ev.rect, 3)) n++;
         return n;
       };
-      const curOk = tangleOf(cur) === 0 && cur.tip.frac <= (isNote ? 0 : WELD_CROSS_FIX_MIN_FRAC) && (isNote || (cur.tip.ang || 0) <= WELD_APPROACH_OK) && rectOnModel(cur.rect) < (isNote ? 0.001 : 0.2) &&
+      const curOk = tangleOf(cur) === 0 && cur.tip.frac <= 0 /* v529: 溶接記号も少しでも横切れば置き直す */ && (isNote || (cur.tip.ang || 0) <= WELD_APPROACH_OK) && rectOnModel(cur.rect) < (isNote ? 0.001 : 0.2) &&
         !rectHitsDim(cur.rect) && leaderDimCrosses(cur.K, cur.tip.screen) === 0 && leaderDimNear(cur.K, cur.tip.screen) < 0.05 &&
         Math.hypot(cur.K.x - cur.tip.screen.x, cur.K.y - cur.tip.screen.y) <= LEADER_HARD_PX; // v501: 離れすぎも直す
       // 前回移していなければ、問題が無い限り動かさない。前回移していたときは、元の置き場所に
@@ -19075,7 +19077,7 @@ pmi._lineFarPoint = null;
         let c = tip.frac * 2400;
         if (!isNote) c += (tip.ang || 0) * 2000 + ((tip.ang || 0) > WELD_APPROACH_OK ? 1500 : 0); // v526: 矢が外側から当たる置き場所を優先
         // v502: 照合番号の指示線は、指している品目以外の部品と画面上で少しでも重なれば大きく減点する
-        if (isNote && tip.frac > 0) c += 2500 + tip.frac * 6000;
+        if (tip.frac > 0) c += 2500 + tip.frac * 6000; // v529: 溶接記号の指示線もモデルを貫通させない(照合番号と同じ)
         for (const r of otherRects) if (ov(rect, r, 6)) { c += 3000; break; }
         // v499: 番号・記号がモデルの上に乗る置き場所は強く避ける(少しでも乗ると減点)
         { const om = rectOnModel(rect); c += om * 6000 + (om > 0 ? 1500 : 0); } // v501: モデルに乗るのは一番避ける
@@ -19099,7 +19101,7 @@ pmi._lineFarPoint = null;
           for (const r of otherRects) if (ov(rect, r, 6)) { hard++; break; }
           for (const [a, b] of otherLeaders) if (segX(tip.screen, ev.K, a, b) || segTouchesRect(a, b, rect, 3)) hard++;
           for (const r of otherRects) if (segTouchesRect(ev.K, tip.screen, r, 3)) hard++;
-          if (isNote && tip.frac > 0) hard++;
+          if (tip.frac > 0) hard++; // v529: 溶接記号も、指示線がモデルを横切るのは重なりと同じく必ず避ける
           if (leaderDimNear(ev.K, tip.screen) > 0.05) hard++; // v523: 0.1→0.05
           if (leaderDimCrosses(ev.K, tip.screen) > 0) hard++; // v523: 指示線が寸法補助線を横切るのも重なりとして扱う
           c += hard * 20000;
