@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v509</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v510</div>
   <!-- v338: 寸法値の位置決めロジック(render()内)が実際に毎フレーム
        計算している値を、画面上でそのまま確認できる簡易デバッグ表示。
        選択中のPMIが寸法のときだけ表示される。開発者ツールを開かなくても
@@ -8431,8 +8431,9 @@
   const LINE_FS = `
     precision mediump float;
     uniform vec3 uColor;
+    uniform float uLineAlpha; // v510: PMIの表示・非表示をふわっと切り替えるための不透明度
     void main() {
-      gl_FragColor = vec4(uColor, 1.0);
+      gl_FragColor = vec4(uColor, uLineAlpha);
     }
   `;
 
@@ -8479,6 +8480,7 @@
     }
   `;
 
+  let uLineAlphaLoc;
   let lineProgram, uModelLoc, uViewLoc, uProjLoc, uColorLoc, uDepthBiasLoc, aPositionLoc, uNdcShiftLoc;
   let faceProgram, fuModelLoc, fuViewLoc, fuProjLoc, fuColorLoc, fuLightLoc, fuViewDirLoc, faPositionLoc, faNormalLoc, fuAlphaLoc, faColorLoc, fuUseVColorLoc;
   if (gl) {
@@ -8489,6 +8491,7 @@
     uColorLoc = gl.getUniformLocation(lineProgram, 'uColor');
     uDepthBiasLoc = gl.getUniformLocation(lineProgram, 'uDepthBias');
     uNdcShiftLoc = gl.getUniformLocation(lineProgram, 'uNdcShift');
+    uLineAlphaLoc = gl.getUniformLocation(lineProgram, 'uLineAlpha');
     aPositionLoc = gl.getAttribLocation(lineProgram, 'aPosition');
 
     faceProgram = createProgram(FACE_VS, FACE_FS);
@@ -10276,6 +10279,7 @@
   // という判定をすべてこちらに置き換えることで、エリアの絞り込みを
   // 既存の表示/非表示の仕組みにそのまま乗せる。
   function isCategoryVisible(pmi) {
+    if (pmi && pmi._ghost) return true; // フェードアウト中は、消える直前の状態のまま描き続ける
     return visibleCategories.has(pmi.category) && (!currentArea || pmi.area === currentArea) && occPmiVisible(pmi);
   }
   const markerEls = new Map();
@@ -19474,15 +19478,17 @@ pmi._lineFarPoint = null;
     const svg = document.getElementById('dimensionJisLines');
     if (!svg) return;
     const out = [];
+    let curOp = '';
     const draw = (a,b,cls) => {
       if (!a || !b) return;
-      out.push('<line class="'+cls+'" x1="'+a.x.toFixed(2)+'" y1="'+a.y.toFixed(2)+'" x2="'+b.x.toFixed(2)+'" y2="'+b.y.toFixed(2)+'"/>');
+      out.push('<line class="'+cls+'"'+curOp+' x1="'+a.x.toFixed(2)+'" y1="'+a.y.toFixed(2)+'" x2="'+b.x.toFixed(2)+'" y2="'+b.y.toFixed(2)+'"/>');
     };
     for(const pmi of (dimensionPmis||[])){
       if(!pmi || pmi._counterboreHidden || pmi.category!=='dimension' || !pmi._dimArrowLinePoints || pmi._dimArrowLinePoints.length!==2) continue;
       if(!isCategoryVisible(pmi) || pmi._markerOccluded || pmi._farOccluded || pmi._dimWholeHidden || pmi._diamHideRealGraphic) continue;
       const g=jisDimScreenGeometry(mvp,pmi);
       if(!g||g.skip) continue;
+      curOp = pmiFadeAttr(pmi);
       // JIS 11.3: 寸法線は測定方向に平行。
       draw(g.a,g.b,'jis-dim-line');
       for(const e of g.exts) draw(e.feature,e.over,'jis-dim-extension');
@@ -19490,7 +19496,60 @@ pmi._lineFarPoint = null;
     svg.innerHTML=out.join('');
   }
 
+  // v510: PMIの表示・非表示の切り替えを、パッと消える/出るのではなく、
+  // ゆっくり透明度を変えて(フェードイン・フェードアウト)切り替える。
+  // 表示・非表示の判定そのものは従来どおり。非表示と判定されたPMIは、
+  // 透明度が0になるまで「消える直前の状態」のまま描き続ける(_ghost)。
+  const PMI_FADE_MS = 450;
+  let pmiFadeLastT = 0;
+  function pmiFadeAlpha(pmi) {
+    const a = pmi && pmi._fadeA != null ? pmi._fadeA : 0;
+    const t = Math.max(0, Math.min(1, a));
+    return t * t * (3 - 2 * t); // なめらかに(はじめと終わりをゆっくり)
+  }
+  function pmiFadeAttr(pmi) { return ' opacity="' + pmiFadeAlpha(pmi).toFixed(3) + '"'; }
+  function makePmiGhost(pmi) {
+    if (pmi._ghost) return;
+    pmi._ghostSaved = { m: pmi._markerOccluded, f: pmi._farOccluded, s: pmi._segVisible, t: pmi._dimThinHidden };
+    pmi._ghost = true;
+    pmi._markerOccluded = false;
+    pmi._farOccluded = false;
+    pmi._dimThinHidden = false;
+    if (pmi._fadeSegSnap) pmi._segVisible = pmi._fadeSegSnap;
+  }
+  function canGhostPmi(pmi) {
+    return !pmi._ghost && pmi._fadeShown && (pmi._fadeA || 0) > 0.01;
+  }
+  function restorePmiGhosts() {
+    for (const pmi of pmiList) {
+      if (!pmi._ghost) continue;
+      const g = pmi._ghostSaved;
+      if (g) { pmi._markerOccluded = g.m; pmi._farOccluded = g.f; pmi._segVisible = g.s; pmi._dimThinHidden = g.t; }
+      pmi._ghostSaved = null;
+      pmi._ghost = false;
+    }
+  }
+  function updatePmiFades() {
+    const now = performance.now();
+    let dt = now - pmiFadeLastT;
+    if (!(dt > 0) || dt > 100) dt = 16;
+    pmiFadeLastT = now;
+    const step = dt / PMI_FADE_MS;
+    let animating = false;
+    for (const pmi of pmiList) {
+      const shown = !pmi._ghost && isCategoryVisible(pmi) && !pmi._markerOccluded && !pmi._farOccluded &&
+        !pmi._dimWholeHidden && !pmi._diamHideRealGraphic && !pmi._noModelLeader && !pmi._dimThinHidden;
+      const a = pmi._fadeA || 0;
+      const na = shown ? Math.min(1, a + step) : Math.max(0, a - step);
+      pmi._fadeA = na;
+      if (shown) { pmi._fadeShown = true; pmi._fadeSegSnap = pmi._segVisible; }
+      else if (na <= 0) { pmi._fadeShown = false; }
+      if (na > 0 && na < 1) animating = true;
+    }
+    if (animating) markRenderActive(120);
+  }
   function render() {
+    restorePmiGhosts();
     if (!pmiGeometryDirty && performance.now() > renderActiveUntil && performance.now() > declutterSettleUntil) {
       requestAnimationFrame(render);
       return;
@@ -19826,6 +19885,7 @@ pmi._lineFarPoint = null;
       lastMVP = mvp; // ドラッグ位置調整(computeDragBasis)が使う最新のカメラ変換
 
       gl.useProgram(lineProgram);
+      if (uLineAlphaLoc) gl.uniform1f(uLineAlphaLoc, 1);
       gl.uniformMatrix4fv(uModelLoc, false, worldMatrix);
       gl.uniformMatrix4fv(uViewLoc, false, VIEW_MATRIX);
       gl.uniformMatrix4fv(uProjLoc, false, projMatrix);
@@ -20037,6 +20097,14 @@ pmi._lineFarPoint = null;
       // 描く(モデル本体・モデルのエッジ表示には無効化をかけない)。
       gl.disable(gl.DEPTH_TEST);
       updateDimThinning(mvp);
+      // v510: 直前まで表示していて今回非表示になったPMIは、フェードアウトが終わるまで描き続ける
+      for (const pmi of pmiList) {
+        const hiddenNow = !isCategoryVisible(pmi) || pmi._markerOccluded || pmi._farOccluded || pmi._dimThinHidden || pmi._noModelLeader;
+        if (hiddenNow && canGhostPmi(pmi) && !pmi._noModelLeader) makePmiGhost(pmi);
+      }
+      const pmiBlendWas = gl.isEnabled(gl.BLEND);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       for (const pmi of pmiList) {
         // v245: 「常に寸法補助線が見えるようにしてほしい」との要望を受けた。
         // これまで寸法補助線は、(1) このPMI単位の代表点による遮蔽判定
@@ -20052,6 +20120,7 @@ pmi._lineFarPoint = null;
         // バイパスを取り消し、他のカテゴリと同じ通常の遮蔽判定に戻す。
         const isDimensionLine = false;
         if (!isCategoryVisible(pmi) || pmi._farOccluded) continue;
+        if (uLineAlphaLoc) gl.uniform1f(uLineAlphaLoc, pmiFadeAlpha(pmi));
         // v249: 直径記号(円+線)は、パイプの軸に垂直な1枚の平面に描かれた
         // 実際の図形であり、法線(pmi._diamPlaneNormalLocal、rebuildPmi
         // Geometryで計算済み)は構造上パイプの軸方向と一致するはずである。
@@ -20078,6 +20147,7 @@ pmi._lineFarPoint = null;
           const n = pmi._diamPlaneNormalLocal;
           const dot = Math.abs(dirLocalNow.x * n.x + dirLocalNow.y * n.y + dirLocalNow.z * n.z);
           diamHide = dot < 0.42; // |cos(65°)| ≈ 0.42
+          if (diamHide && (pmi._ghost || canGhostPmi(pmi))) { makePmiGhost(pmi); diamHide = false; }
         }
         pmi._diamHideRealGraphic = diamHide;
         // v385: 「回転させたときに寸法値や寸法補助線は消えるのに、端末記号
@@ -20094,8 +20164,12 @@ pmi._lineFarPoint = null;
           // v491: 寸法補助線が描けない向きでは、寸法線・寸法値・矢印もまとめて消す
           const jisG = (pmi._dimArrowLinePoints && pmi._dimArrowLinePoints.length === 2) ? jisDimScreenGeometry(mvp, pmi) : { skip: true };
           if (pmi._markerOccluded || diamHide || allSegHidden || pmi._dimThinHidden || !jisG) {
-            pmi._dimWholeHidden = true;
-            continue;
+            if (jisG && (pmi._ghost || canGhostPmi(pmi))) {
+              makePmiGhost(pmi); // v510: 消える寸法も、フェードアウトが終わるまでは描く
+            } else {
+              pmi._dimWholeHidden = true;
+              continue;
+            }
           }
         }
         const color = pmi.id === selectedId ? COLOR_HIGHLIGHT : pmi._color;
@@ -20233,6 +20307,7 @@ pmi._lineFarPoint = null;
         // 浮いた位置になった)が不安定だったことが原因と考えられるため、
         // そちらを別途安定させる方向で対応する。
         if (!pmi._billboardTriData || !isCategoryVisible(pmi) || pmi._markerOccluded || pmi._farOccluded) continue;
+        if (uLineAlphaLoc) gl.uniform1f(uLineAlphaLoc, pmiFadeAlpha(pmi));
         const color = pmi.id === selectedId ? COLOR_HIGHLIGHT : pmi._color;
         const off = posOffsets.get(pmi.id);
         const c = pmi._billboardCentroid;
@@ -20247,6 +20322,8 @@ pmi._lineFarPoint = null;
         gl.uniformMatrix4fv(uModelLoc, false, billboardMatrix);
         drawTris(pmi._billboardTriData, color);
       }
+      if (uLineAlphaLoc) gl.uniform1f(uLineAlphaLoc, 1);
+      if (!pmiBlendWas) gl.disable(gl.BLEND);
       gl.enable(gl.DEPTH_TEST);
       gl.uniformMatrix4fv(uModelLoc, false, worldMatrix);
 
@@ -20350,7 +20427,7 @@ pmi._lineFarPoint = null;
           el.style.opacity = '0';
         } else {
           pmi._screen = s;
-          el.style.opacity = '1';
+          el.style.opacity = pmiFadeAlpha(pmi).toFixed(3);
           // 【上下左右+中央の5区画】「赤枠で四角形になっている箇所は、
           // その四角形の領域専用の区画(5つ目の「中央」)を作り、大きく
           // 押し出さず近くにまとめる」との確認を受けた実装。画面上の
@@ -20460,7 +20537,7 @@ pmi._lineFarPoint = null;
         // 非表示PMIは障害物にしないので、隠れている線を避けるために注記が
         // 不自然に遠くへ移動することはない。
         for (const pmi of pmiList) {
-          if (pmi.category === 'note' || !pmi._screen || !isCategoryVisible(pmi) || pmi._markerOccluded || pmi._farOccluded) continue;
+          if (pmi.category === 'note' || pmi._ghost || !pmi._screen || !isCategoryVisible(pmi) || pmi._markerOccluded || pmi._farOccluded) continue;
           obstacles.push({
             pmi,
             rect: rectForPmi(pmi),
@@ -20469,7 +20546,7 @@ pmi._lineFarPoint = null;
         }
 
         for (const pmi of pmiList) {
-          if (pmi.category !== 'note' || !pmi._screen || !isCategoryVisible(pmi) || pmi._markerOccluded || pmi._farOccluded) continue;
+          if (pmi.category !== 'note' || pmi._ghost || !pmi._screen || !isCategoryVisible(pmi) || pmi._markerOccluded || pmi._farOccluded) continue;
           const origin = noteLineOriginScreen(pmi);
           if (!origin) continue;
           const line = [origin, { x: pmi._screen.x, y: pmi._screen.y }];
@@ -20545,6 +20622,15 @@ pmi._lineFarPoint = null;
           const chosenSet = new Set(chosen.map((c) => c.pmi.id));
           for (const c of noteCandidates) {
             const hiddenByLimit = !chosenSet.has(c.pmi.id);
+            if (hiddenByLimit && canGhostPmi(c.pmi)) {
+              // v510: 件数制限で外れた注記も、フェードアウトが終わるまでは描く
+              c.pmi._notePrevChosen = false;
+              c.pmi._ghost = true;
+              c.pmi._ghostSaved = null;
+              const gel = markerEls.get(c.pmi.id);
+              if (gel) { gel.style.display = ''; gel.style.opacity = pmiFadeAlpha(c.pmi).toFixed(3); }
+              continue;
+            }
             c.pmi._notePrevChosen = !hiddenByLimit;
             c.pmi._markerOccluded = hiddenByLimit;
             c.pmi._farOccluded = hiddenByLimit;
@@ -20554,7 +20640,7 @@ pmi._lineFarPoint = null;
             const el = markerEls.get(c.pmi.id);
             if (el) {
               el.style.display = hiddenByLimit ? 'none' : '';
-              el.style.opacity = hiddenByLimit ? '0' : '1';
+              el.style.opacity = hiddenByLimit ? '0' : pmiFadeAlpha(c.pmi).toFixed(3);
             }
           }
         }
@@ -21350,7 +21436,7 @@ pmi._lineFarPoint = null;
           const connectorStrokeWidth = pmi.category === 'weld' ? (1 * weldNotationScale()) : 1;
           svgLines.push(
             '<line x1="' + modelScreen.x + '" y1="' + modelScreen.y + '" x2="' + clipX + '" y2="' + clipY + '"' +
-            ' stroke="' + colorToCss(pmi.id === selectedId ? COLOR_HIGHLIGHT : pmi._color) + '" stroke-width="' + connectorStrokeWidth + '" />'
+            pmiFadeAttr(pmi) + ' stroke="' + colorToCss(pmi.id === selectedId ? COLOR_HIGHLIGHT : pmi._color) + '" stroke-width="' + connectorStrokeWidth + '" />'
           );
           // v421: JIS Z 3021 4.6.1「矢は…矢尻をもたなければならない」。溶接記号の矢の先(モデル側)に
           // 塗りつぶしの矢尻を付ける(注記2: 塗りつぶしが標準)。
@@ -21362,7 +21448,7 @@ pmi._lineFarPoint = null;
               const bx = modelScreen.x + ux * L, by = modelScreen.y + uy * L;
               svgLines.push('<polygon points="' + modelScreen.x.toFixed(1) + ',' + modelScreen.y.toFixed(1) + ' ' +
                 (bx - uy * W).toFixed(1) + ',' + (by + ux * W).toFixed(1) + ' ' + (bx + uy * W).toFixed(1) + ',' + (by - ux * W).toFixed(1) +
-                '" fill="' + colorToCss(pmi.id === selectedId ? COLOR_HIGHLIGHT : pmi._color) + '" />');
+                '"' + pmiFadeAttr(pmi) + ' fill="' + colorToCss(pmi.id === selectedId ? COLOR_HIGHLIGHT : pmi._color) + '" />');
             }
           }
         }
@@ -21986,7 +22072,7 @@ pmi._lineFarPoint = null;
                   if (hits(cx, cy)) continue;
                   markerLeft = cx; markerTop = cy;
                   const extLen = OUT_GAP_PX + alongHalf * 2 + 2;
-                  dimExtSegs.push({ x1: end.x, y1: end.y, x2: end.x + ux * extLen, y2: end.y + uy * extLen, sel: pmi.id === selectedId });
+                  dimExtSegs.push({ x1: end.x, y1: end.y, x2: end.x + ux * extLen, y2: end.y + uy * extLen, sel: pmi.id === selectedId, op: pmiFadeAlpha(pmi) });
                   break;
                 }
               }
@@ -22036,7 +22122,7 @@ pmi._lineFarPoint = null;
           // WebGLの線(gl.LINES)は実画素で1px幅なので、高解像度の画面でも同じ太さに見えるようにする
           const extW = (1 / Math.min(window.devicePixelRatio || 1, 2)).toFixed(2);
           extSvg.innerHTML = dimExtSegs.map((g) => '<line x1="' + (cr.left + g.x1).toFixed(1) + '" y1="' + (cr.top + g.y1).toFixed(1) +
-            '" x2="' + (cr.left + g.x2).toFixed(1) + '" y2="' + (cr.top + g.y2).toFixed(1) + '" stroke="' +
+            '" x2="' + (cr.left + g.x2).toFixed(1) + '" y2="' + (cr.top + g.y2).toFixed(1) + '" opacity="' + (g.op == null ? 1 : g.op).toFixed(3) + '" stroke="' +
             colorToCss(g.sel ? COLOR_HIGHLIGHT : COLOR_DIM) + '" stroke-width="' + extW + '" />').join('');
         }
       } catch (dimLineErr) {
@@ -22114,7 +22200,7 @@ pmi._lineFarPoint = null;
             }).join(' ');
           }
           polys.push(
-            '<polygon points="' + pts + '" fill="none" stroke="' +
+            '<polygon points="' + pts + '"' + pmiFadeAttr(pmi) + ' fill="none" stroke="' +
             colorToCss(pmi.id === selectedId ? COLOR_HIGHLIGHT : [0.96, 0.98, 0.97]) +
             '" stroke-width="1.5" />'
           );
@@ -22165,6 +22251,8 @@ pmi._lineFarPoint = null;
         }
       }
     }
+    try { updatePmiFades(); } catch (e) { console.warn('updatePmiFades failed:', e); }
+    restorePmiGhosts();
     requestAnimationFrame(render);
   }
 
