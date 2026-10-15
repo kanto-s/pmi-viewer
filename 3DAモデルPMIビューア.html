@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v519</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v520</div>
   <!-- v338: 寸法値の位置決めロジック(render()内)が実際に毎フレーム
        計算している値を、画面上でそのまま確認できる簡易デバッグ表示。
        選択中のPMIが寸法のときだけ表示される。開発者ツールを開かなくても
@@ -18588,12 +18588,25 @@ pmi._lineFarPoint = null;
     // v519: モデル全体の画面上の中心(外側=空いている側へ照合番号を出すための目安)。
     // 画面を粗い格子で調べ、モデルが写っている点の平均をとる。
     let modelCx = cw / 2, modelCy = ch / 2;
+    // v520: モデルが写っている範囲(外接矩形)も求める。照合番号はこの範囲を縦6×横5ほどの
+    // 区画に分けたとき、指している点のある区画かその隣に収まる距離に置く(遠くへ線を伸ばさない)。
+    let mbx0 = Infinity, mbx1 = -Infinity, mby0 = Infinity, mby1 = -Infinity;
     { let sx = 0, sy = 0, k = 0;
-      for (let i = 0; i < 32; i++) for (let j = 0; j < 32; j++) {
-        const x = cw * (i + 0.5) / 32, y = ch * (j + 0.5) / 32;
-        if (cover.at(x, y)) { sx += x; sy += y; k++; }
+      for (let i = 0; i < 48; i++) for (let j = 0; j < 48; j++) {
+        const x = cw * (i + 0.5) / 48, y = ch * (j + 0.5) / 48;
+        if (cover.at(x, y)) { sx += x; sy += y; k++; if (x < mbx0) mbx0 = x; if (x > mbx1) mbx1 = x; if (y < mby0) mby0 = y; if (y > mby1) mby1 = y; }
       }
       if (k) { modelCx = sx / k; modelCy = sy / k; } }
+    if (!(mbx1 > mbx0)) { mbx0 = 0; mbx1 = cw; mby0 = 0; mby1 = ch; }
+    const cellW = (mbx1 - mbx0) / 6, cellH = (mby1 - mby0) / 5;
+    const BALLOON_NEAR_PX = Math.max(70, Math.min(170, Math.max(cellW, cellH) * 1.3)); // 区画1つ分ほど
+    // 番号の中心がモデルの範囲(区画の半分の余白付き)の外に出た分だけ減点する
+    const outsideBoxPenalty = (P) => {
+      const ex = Math.max(0, mbx0 - cellW * 0.5 - P.x, P.x - (mbx1 + cellW * 0.5));
+      const ey = Math.max(0, mby0 - cellH * 0.5 - P.y, P.y - (mby1 + cellH * 0.5));
+      const e = Math.hypot(ex, ey);
+      return e > 0 ? 6000 + e * 60 : 0;
+    };
     // v508: 照合番号をまとめて決める(全体最適化)。
     // これまでは1つずつ順に置いていたため、先に置いた番号が良い場所を取り、後の番号が
     // 重なりを我慢することがあった。ここでは、
@@ -18656,6 +18669,7 @@ pmi._lineFarPoint = null;
             for (const r of sRects) { if (ov(c.rect, r, 6)) u += 50000; if (segTouchesRect(c.K, c.O, r, 3)) u += 50000; }
             for (const [a, b] of sLeaders) { if (segX(c.O, c.K, a, b)) u += 50000; if (segTouchesRect(a, b, c.rect, 3)) u += 50000; }
             u += leaderLenPenalty(Math.hypot(c.K.x - c.O.x, c.K.y - c.O.y)) * 0.5;
+            u += outsideBoxPenalty(c.P); // v520: モデルの範囲の外へ出さない
             // v517: 回転中に飛び回らないように。前のコマの置き場所を「指している点(O)から見た位置」で
             // 覚えておき、それに近い候補を強く優先する(モデルと一緒に動く分には自然なため、
             // 画面上の絶対位置ではなく指している点からの相対位置で比べる)。
@@ -18664,7 +18678,7 @@ pmi._lineFarPoint = null;
             return u;
           };
           const isTop = topBalloons.has(w);
-          const D0 = rad + BALLOON_RULE_LEADER_PX, Dmax = rad + LEADER_HARD_PX;
+          const D0 = rad + Math.min(BALLOON_RULE_LEADER_PX, BALLOON_NEAR_PX * 0.6), Dmax = rad + Math.min(LEADER_HARD_PX, BALLOON_NEAR_PX); // v520
           const cands = [];
           const dirsTried = [];
           const addDir = (base, tilt, extra) => {
@@ -18707,11 +18721,31 @@ pmi._lineFarPoint = null;
               const deg = k * 15, a = deg * Math.PI / 180, ux = Math.cos(a), uy = Math.sin(a);
               const dev = ruleDeg == null ? Math.min(Math.abs(((deg + 180) % 360) - 180), Math.abs(((deg + 360) % 360) - 180)) : Math.abs(((deg - ruleDeg + 540) % 360) - 180);
               const inward = (1 - (ux * ox + uy * oy)) / 2; // 0: 外向き 〜 1: モデルの中心向き
-              for (let D = rad + 8; D <= rad + LEADER_HARD_PX * 1.4; D += 8) {
+              for (let D = rad + 8; D <= rad + BALLOON_NEAR_PX; D += 6) { // v520: 区画1つ分まで
                 const c = evalB({ x: O.x + ux * D, y: O.y + uy * D });
                 if (!okStatic(c)) continue;
                 c.base = deg;
                 c.rule = 3000 + dev * 25 + inward * 2500 + Math.abs(D - D0) * 3;
+                c.u = unary(c) + c.rule;
+                cands.push(c);
+              }
+            }
+          }
+          // v520: それでも置き場所が無いときは、近く(区画1つ分以内)で「いちばんましな」所に置く。
+          // (以前はCADの元の位置のまま残り、区画をいくつもまたぐ長い指示線になっていた)
+          if (!cands.length) {
+            for (let k = 0; k < 24; k++) {
+              const deg = k * 15, a = deg * Math.PI / 180, ux = Math.cos(a), uy = Math.sin(a);
+              for (let D = rad + 8; D <= rad + BALLOON_NEAR_PX; D += 8) {
+                const c = evalB({ x: O.x + ux * D, y: O.y + uy * D });
+                if (!inCanvas(c.rect)) continue;
+                let soft = 0;
+                const om = rectOnModel(c.rect);
+                if (om > 0) soft += 25000 + om * 20000;
+                const fr = noteLeaderOtherFrac(cover, c.K, c.O, w);
+                if (fr > 0) soft += 15000 + fr * 20000;
+                c.base = deg;
+                c.rule = 6000 + soft + D * 2;
                 c.u = unary(c) + c.rule;
                 cands.push(c);
               }
@@ -18851,7 +18885,7 @@ pmi._lineFarPoint = null;
               for (let k = 0; k < 24; k++) {
                 const deg = k * 15, a = deg * Math.PI / 180, ux = Math.cos(a), uy = Math.sin(a);
                 const dev = ruleDeg == null ? Math.min(Math.abs(((deg + 180) % 360) - 180), Math.abs(((deg + 360) % 360) - 180)) : Math.abs(((deg - ruleDeg + 540) % 360) - 180);
-                for (let D = it.rad + 8; D <= it.rad + LEADER_HARD_PX * 1.5; D += 12) { // 重なりを避けるためなら上限の1.5倍まで
+                for (let D = it.rad + 8; D <= it.rad + BALLOON_NEAR_PX; D += 8) { // v520: 重なりを避ける場合も区画1つ分まで
                   const c = it.evalB({ x: it.O.x + ux * D, y: it.O.y + uy * D });
                   // 番号どうしの重なりを無くすことを最優先にするため、ここでは「モデルに少しかかる」
                   // 「指示線がほかの部品の上を通る」置き場所も、減点したうえで候補に入れる
