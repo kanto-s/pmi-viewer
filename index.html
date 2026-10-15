@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v514</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v515</div>
   <!-- v338: 寸法値の位置決めロジック(render()内)が実際に毎フレーム
        計算している値を、画面上でそのまま確認できる簡易デバッグ表示。
        選択中のPMIが寸法のときだけ表示される。開発者ツールを開かなくても
@@ -1310,6 +1310,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v515: マウスを近づけて寸法値が拡大表示されても、照合番号(バルーン)などの注記はその寸法を避けて離れていかないようにしました(注記の置き場所は、寸法値の普段の大きさで決めます)
         <li>v514: 注記(照合番号⑤など)が件数制限の境目で出たり消えたりを繰り返さないよう、直前に出ていた注記を残りやすくし、切り替わった直後0.7秒は状態を保つようにしました
         <li>v513: 表示・非表示の判定の境目に緩衝地帯を設け(前後の判定の幅を2倍、直径寸法の向き・寸法補助線の潰れ具合・寸法どうしの間隔・見る方向の区画にも余裕を追加)、境目付近でPMIが出たり消えたりを繰り返さないようにしました
         <li>v512: PMIが表示されるときだけ、ゆっくり(約0.45秒)浮かび上がるように表示します。消えるときは従来どおりすぐに消えます
@@ -8217,6 +8218,7 @@
   let lastOcclusionRotation = null; // updatePmiModelOcclusionの再計算スロットル用(render()参照)
   let declutterSettleUntil = 0; // v386: この時刻まではキャッシュを使わず配置を計算し直す(v378の回数指定から時間指定に変更)
   const DECLUTTER_SETTLE_MS = 350;
+  let lastDeclutterBaseKey = null, noteHoverFreeze = null, noteHoverFreezeKey = null; // v515
   let lastDeclutterStateKey = null; // v177: 重なり回避の再計算スロットル用(render()参照)
   function composeWorldMatrix(t, q, s) {
     const m = mat4FromQuat(q);
@@ -18540,6 +18542,7 @@ pmi._lineFarPoint = null;
             if (!el || el.style.display === 'none' || q._dimWholeHidden || q._dimThinHidden) continue;
             let r = q._dimFinalRect;
             if (!r) { const tg = el.querySelector('.pmi-tag'); if (tg) { const br = tg.getBoundingClientRect(); if (br.width > 0 && br.height > 0) r = br; } }
+            r = dimRectForNoteLayout(q, r); // v515
             if (r) sRects.push({ x0: r.left - cr0.left, x1: r.right - cr0.left, y0: r.top - cr0.top, y1: r.bottom - cr0.top });
             continue;
           }
@@ -18822,6 +18825,7 @@ pmi._lineFarPoint = null;
           if (!el || el.style.display === 'none' || q._dimWholeHidden || q._dimThinHidden) continue;
           let r = q._dimFinalRect;
           if (!r) { const tg = el.querySelector('.pmi-tag'); if (tg) { const br = tg.getBoundingClientRect(); if (br.width > 0 && br.height > 0) r = br; } }
+          if (w && w.category === 'note') r = dimRectForNoteLayout(q, r); // v515
           if (!r) continue;
           const cr0 = cvRect();
           otherRects.push({ x0: r.left - cr0.left, x1: r.right - cr0.left, y0: r.top - cr0.top, y1: r.bottom - cr0.top });
@@ -18998,11 +19002,21 @@ pmi._lineFarPoint = null;
   }
 
   const DIM_TEXT_CLEAR_MARGIN_PX = 5;
+  // v515: マウスを近づけて拡大表示している寸法値は、注記(照合番号のバルーンなど)の
+  // 置き場所を決めるときだけ普段の大きさとして扱う。拡大に合わせてバルーンが
+  // 離れていかないようにするため(溶接記号は従来どおり拡大後の大きさを避ける)。
+  function dimRectForNoteLayout(q, r) {
+    if (!r || !q || q.id !== hoverDimId) return r;
+    const cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
+    const hw = (r.right - r.left) / 2 * DIM_TEXT_REST_RATIO, hh = (r.bottom - r.top) / 2 * DIM_TEXT_REST_RATIO;
+    return { left: cx - hw, right: cx + hw, top: cy - hh, bottom: cy + hh };
+  }
   function resolveTagOverlapsWithDimensionText(allScreenPmis, mvp) {
     const cr = cvRect();
     const cw = cvSize().w, ch = cvSize().h;
     const M = DIM_TEXT_CLEAR_MARGIN_PX;
     const dimRects = [];
+    const dimRectsNote = [];
     for (const dp of allScreenPmis) {
       if (dp.category !== 'dimension') continue;
       const el = markerEls.get(dp.id);
@@ -19013,6 +19027,8 @@ pmi._lineFarPoint = null;
       let r = dp._dimFinalRect;
       if (!r) { const br = tag.getBoundingClientRect(); if (!(br.width > 0 && br.height > 0)) continue; r = br; }
       dimRects.push({ x0: r.left - cr.left - M, x1: r.right - cr.left + M, y0: r.top - cr.top - M, y1: r.bottom - cr.top + M });
+      const rr = dimRectForNoteLayout(dp, r); // v515: 注記用(拡大前の大きさ)
+      dimRectsNote.push({ x0: rr.left - cr.left - M, x1: rr.right - cr.left + M, y0: rr.top - cr.top - M, y1: rr.bottom - cr.top + M });
     }
     if (!dimRects.length) return;
     const movers = allScreenPmis.filter((p) => (p.category === 'weld' || p.category === 'note') && p._screen && !p.asRecorded);
@@ -19035,9 +19051,11 @@ pmi._lineFarPoint = null;
     };
     // O: 指示点、P: タグ中心。タグが寸法値に重なる位置に加え、指示線が
     // 寸法値の上を横切る位置も使わない。
+    const dimRectsFor = (p) => (p.category === 'note' ? dimRectsNote : dimRects); // v515
     const blocked = (p, r, O, P) => {
-      for (const d of dimRects) if (ov(r, d)) return true;
-      if (O && P) for (const d of dimRects) if (segHits(O, P, d)) return true;
+      const drs = dimRectsFor(p);
+      for (const d of drs) if (ov(r, d)) return true;
+      if (O && P) for (const d of drs) if (segHits(O, P, d)) return true;
       for (const q of movers) {
         if (q === p) continue;
         const rq = rectOf(q, q._screen.x, q._screen.y);
@@ -19047,7 +19065,7 @@ pmi._lineFarPoint = null;
     };
     for (const p of movers) {
       const cur = rectOf(p, p._screen.x, p._screen.y);
-      if (!dimRects.some((d) => ov(cur, d))) continue; // 寸法値と重なっていなければ動かさない
+      if (!dimRectsFor(p).some((d) => ov(cur, d))) continue; // 寸法値と重なっていなければ動かさない
       const g = geo.get(p);
       const oLocal = leaderModelPoint(p); // v494
       const O = (oLocal && project(mvp, oLocal)) || { x: p._screen.x + g.offX, y: p._screen.y + g.offY };
@@ -20900,7 +20918,7 @@ pmi._lineFarPoint = null;
       // 押し離された寸法など、この連結線を使うすべてのカテゴリに影響する
       // 不具合だった。selectedIdをキーに含め、選択状態が変わった際にも
       // 確実に再計算されるようにした。
-      const declutterStateKey = sceneRotation.x + ',' + sceneRotation.y + ',' + sceneRotation.z + ',' + sceneRotation.w +
+      const declutterBaseKey = sceneRotation.x + ',' + sceneRotation.y + ',' + sceneRotation.z + ',' + sceneRotation.w +
         ',' + sceneScale + ',' + sceneTranslation.x + ',' + sceneTranslation.y +
         ',' + weldNotationScale() + ',' + noteBoxScale() + ',' + dimensionTagScale() + ',' + allScreenPmis.length +
         ',' + selectedId +
@@ -20918,7 +20936,8 @@ pmi._lineFarPoint = null;
         // ハイライト中の寸法もキーに含め、ハイライトが変わるたびに配置を計算し
         // 直す(寸法値の拡大がDOMに反映されるのは1フレーム後なので、v378の
         // 「変化の直後に2回計算し直す」仕組みで拡大後の大きさが使われる)。
-        ',' + (hoverDimId || '');
+        '';
+      const declutterStateKey = declutterBaseKey + ',' + (hoverDimId || '');
       // v378: 寸法値の画面上の位置(DOM)は1フレーム遅れて反映されるため、
       // 視点が止まった直後の数フレームは、キャッシュを使わず計算し直す。
       // v386: 寸法値の大きさ・位置の変化(ハイライトによる拡大など)は、DOMへの
@@ -20927,6 +20946,16 @@ pmi._lineFarPoint = null;
       // 確定してしまい、拡大した寸法値と溶接記号・注記が重なったままになる
       // 場合があった。変化から DECLUTTER_SETTLE_MS の間は毎フレーム計算し直す。
       const nowMs = performance.now();
+      // v515: マウスを近づけて寸法値を拡大しても、注記(照合番号のバルーンなど)は動かさない。
+      // 視点などが同じまま「拡大する寸法」だけが変わったときは、拡大する前に決まっていた
+      // 注記の位置を覚えておき、配置を計算し直したあとも注記だけはその位置に戻す。
+      if (declutterBaseKey !== noteHoverFreezeKey) { noteHoverFreeze = null; noteHoverFreezeKey = declutterBaseKey; }
+      if (hoverDimId && !noteHoverFreeze && declutterBaseKey === lastDeclutterBaseKey && nowMs >= declutterSettleUntil) {
+        noteHoverFreeze = new Map();
+        for (const pmi of allScreenPmis) {
+          if (pmi.category === 'note' && pmi._declutterDX != null) noteHoverFreeze.set(pmi.id, { dx: pmi._declutterDX, dy: pmi._declutterDY });
+        }
+      }
       if (declutterStateKey !== lastDeclutterStateKey) declutterSettleUntil = nowMs + DECLUTTER_SETTLE_MS;
       const useDeclutterCache = declutterStateKey === lastDeclutterStateKey && nowMs >= declutterSettleUntil;
       if (useDeclutterCache) {
@@ -21329,6 +21358,14 @@ pmi._lineFarPoint = null;
         }
       }
 
+      if (noteHoverFreeze) {
+        for (const pmi of allScreenPmis) {
+          const f = noteHoverFreeze.get(pmi.id);
+          if (!f) continue;
+          pmi._screen.x = pmi._naturalScreenX + f.dx;
+          pmi._screen.y = pmi._naturalScreenY + f.dy;
+        }
+      }
       for (const pmi of allScreenPmis) {
         pmi._declutterDX = pmi._screen.x - pmi._naturalScreenX;
         pmi._declutterDY = pmi._screen.y - pmi._naturalScreenY;
@@ -21578,6 +21615,7 @@ pmi._lineFarPoint = null;
         declutterSvg.innerHTML = svgLines.join('');
       }
       lastDeclutterStateKey = declutterStateKey;
+      lastDeclutterBaseKey = declutterBaseKey;
       } // v177: if (declutterStateKey === lastDeclutterStateKey) ... else の閉じ
 
       // v229〜v234: 寸法の数値を線に沿って回転・線の上に配置する機能を、
