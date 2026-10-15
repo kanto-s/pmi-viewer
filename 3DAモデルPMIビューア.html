@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v512</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v513</div>
   <!-- v338: 寸法値の位置決めロジック(render()内)が実際に毎フレーム
        計算している値を、画面上でそのまま確認できる簡易デバッグ表示。
        選択中のPMIが寸法のときだけ表示される。開発者ツールを開かなくても
@@ -1310,6 +1310,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v513: 表示・非表示の判定の境目に緩衝地帯を設け(前後の判定の幅を2倍、直径寸法の向き・寸法補助線の潰れ具合・寸法どうしの間隔・見る方向の区画にも余裕を追加)、境目付近でPMIが出たり消えたりを繰り返さないようにしました
         <li>v512: PMIが表示されるときだけ、ゆっくり(約0.45秒)浮かび上がるように表示します。消えるときは従来どおりすぐに消えます
         <li>v511: 計算を速くしました(表示や配置の結果は変えていません)。モデルを回転させている間の1コマあたりの計算時間を約4割短くしています。①画面の大きさの読み取りを1コマに1回にまとめ、寸法値の位置の読み取りも全部置き終えてから一度に行うようにして、ブラウザの配置計算のやり直しを大幅に減らしました ②照合番号・溶接記号の置き場所の評価で、指示線から遠い寸法線を先に除外し、距離の計算(Math.hypot)をより速い同じ値の計算に置き換えました ③STEPの読み込み(三角形分割)で、点や辺の照合を文字列ではなく数値で行うようにし、読み込みも約1割速くなりました</li>
         <li>v509: v508で、照合番号どうしが重なったままになる場面があった問題を修正しました(例: ②と⑤の丸が重なる)。向きのルール(真横・上)の候補だけでは重なりを避けられないときは、重なっている番号に指示点のまわり全方向の置き場所を候補として加えて解き直し、重ならないことを向きのルールより優先します。組み合わせを探す時間の上限も、候補作りとは別に数えるようにしました。</li>
@@ -11431,7 +11432,7 @@
     return { x: (b[0] + b[3]) / 2, y: (b[1] + b[4]) / 2, z: (b[2] + b[5]) / 2 };
   }
   // v433: 表示・非表示の境目の不感帯の幅(mm)。対象(全体、またはサブアセンブリ)の大きさに比例させる。
-  const OCC_PLANE_DEADBAND_RATIO = 0.04;
+  const OCC_PLANE_DEADBAND_RATIO = 0.08; // v513: 境目付近の揺らぎ対策で緩衝地帯を広げた(旧0.04)
   function pmiOcclusionMargin() {
     let r = boundsRadius;
     if (occSelected >= 0 && occNodes[occSelected].parent >= 0 && (occView !== 'all' || occPmiOnlySelected)) {
@@ -19362,7 +19363,7 @@ pmi._lineFarPoint = null;
   // 読みやすさは刻みの1/4)越えるまでは前回の値を使い続ける(ヒステリシス)。
   const viewBinState = {};
   function stableViewBin(dirL, who) {
-    const BIN = 20 * Math.PI / 180, HYS = 3 * Math.PI / 180;
+    const BIN = 20 * Math.PI / 180, HYS = 5 * Math.PI / 180; // v513: 3°→5°
     const az = Math.atan2(dirL.x, dirL.z), el = Math.asin(Math.max(-1, Math.min(1, dirL.y)));
     let a = Math.round(az / BIN), e = Math.round(el / BIN);
     const prev = viewBinState[who];
@@ -19460,7 +19461,7 @@ pmi._lineFarPoint = null;
       // v433: 間隔がしきい値ちょうど付近のときに出たり消えたりしないよう、
       // 直前に表示していた寸法は少し近くても残し、隠れていた寸法は少し
       // 離れてから出す(ヒステリシス)。
-      const sepShown2 = (DIM_AUTO_MIN_SEP_PX * 0.9) ** 2, sepHidden2 = (DIM_AUTO_MIN_SEP_PX * 1.1) ** 2;
+      const sepShown2 = (DIM_AUTO_MIN_SEP_PX * 0.85) ** 2, sepHidden2 = (DIM_AUTO_MIN_SEP_PX * 1.15) ** 2; // v513: ±10%→±15%
       for (const c of cands) {
         const sp = project(mvp, c.pmi._markerAnchor || c.pmi.anchor || [0, 0, 0]);
         if (!sp) { c.pmi._dimThinHidden = true; continue; }
@@ -19554,14 +19555,16 @@ pmi._lineFarPoint = null;
     const a=project(mvp,pts[0]), b=project(mvp,pts[1]);
     if(!a||!b) return null;
     const L=Math.hypot(b.x-a.x,b.y-a.y);
-    if(L<1) return null;
+    // v513: 直前に表示していた寸法は少し潰れても残し、隠れていた寸法ははっきり見えてから出す(緩衝地帯)
+    const shownPrev = pmi._visPrev !== false;
+    if(L<(shownPrev?0.7:2)) return null;
     const exts=[];
     for(const e of info.exts){
       const s=project(mvp,e.side), f=project(mvp,e.feature);
       if(!s||!f) return null;
       const el=Math.hypot(s.x-f.x,s.y-f.y);
       // 寸法補助線が画面上でほぼ点に潰れて見えない向き → 寸法全体を消す
-      if(el<3) return null;
+      if(el<(shownPrev?2:5)) return null;
       // JIS 11.2 b: 寸法線を僅かに超える側へ約3px延長。
       const over={x:s.x+(s.x-f.x)/el*3,y:s.y+(s.y-f.y)/el*3};
       exts.push({feature:f,over});
@@ -19641,6 +19644,7 @@ pmi._lineFarPoint = null;
       const a = pmi._fadeA || 0;
       const na = shown ? Math.min(1, a + step) : (PMI_FADE_OUT ? Math.max(0, a - step) : 0);
       pmi._fadeA = na;
+      pmi._visPrev = shown;
       if (shown) { pmi._fadeShown = true; pmi._fadeSegSnap = pmi._segVisible; }
       else if (na <= 0) { pmi._fadeShown = false; }
       if (na > 0 && na < 1) animating = true;
@@ -20254,7 +20258,9 @@ pmi._lineFarPoint = null;
           const dirLocalNow = rotateVecByQuat({ x: VIEW_DIR[0], y: VIEW_DIR[1], z: VIEW_DIR[2] }, quatConjugate(sceneRotation));
           const n = pmi._diamPlaneNormalLocal;
           const dot = Math.abs(dirLocalNow.x * n.x + dirLocalNow.y * n.y + dirLocalNow.z * n.z);
-          diamHide = dot < 0.42; // |cos(65°)| ≈ 0.42
+          // v513: 境目(65°)付近で揺らがないよう、表示中は約69°まで残し、非表示中は約61°まで戻らない
+          diamHide = pmi._diamHidePrev ? dot < 0.48 : dot < 0.36;
+          pmi._diamHidePrev = diamHide;
           if (diamHide && (pmi._ghost || canGhostPmi(pmi))) { makePmiGhost(pmi); diamHide = false; }
         }
         pmi._diamHideRealGraphic = diamHide;
