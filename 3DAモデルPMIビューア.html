@@ -19612,8 +19612,11 @@ pmi._lineFarPoint = null;
     pmi._dimThinHidden = false;
     if (pmi._fadeSegSnap) pmi._segVisible = pmi._fadeSegSnap;
   }
+  // v511: 「ふわっと消える」のは不要との指摘を受け、消えるときは従来どおり即座に消す
+  // (フェードは表示されるときだけ)。
+  const PMI_FADE_OUT = false;
   function canGhostPmi(pmi) {
-    return !pmi._ghost && pmi._fadeShown && (pmi._fadeA || 0) > 0.01;
+    return PMI_FADE_OUT && !pmi._ghost && pmi._fadeShown && (pmi._fadeA || 0) > 0.01;
   }
   function restorePmiGhosts() {
     for (const pmi of pmiList) {
@@ -19635,7 +19638,7 @@ pmi._lineFarPoint = null;
       const shown = !pmi._ghost && isCategoryVisible(pmi) && !pmi._markerOccluded && !pmi._farOccluded &&
         !pmi._dimWholeHidden && !pmi._diamHideRealGraphic && !pmi._noModelLeader && !pmi._dimThinHidden;
       const a = pmi._fadeA || 0;
-      const na = shown ? Math.min(1, a + step) : Math.max(0, a - step);
+      const na = shown ? Math.min(1, a + step) : (PMI_FADE_OUT ? Math.max(0, a - step) : 0);
       pmi._fadeA = na;
       if (shown) { pmi._fadeShown = true; pmi._fadeSegSnap = pmi._segVisible; }
       else if (na <= 0) { pmi._fadeShown = false; }
