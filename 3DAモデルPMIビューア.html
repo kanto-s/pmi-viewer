@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v522</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v523</div>
   <!-- v338: 寸法値の位置決めロジック(render()内)が実際に毎フレーム
        計算している値を、画面上でそのまま確認できる簡易デバッグ表示。
        選択中のPMIが寸法のときだけ表示される。開発者ツールを開かなくても
@@ -18474,8 +18474,9 @@ pmi._lineFarPoint = null;
       ((p.category === 'weld' && p._modelAttachmentPoint) || (p.category === 'note' && leaderModelPoint(p))));
     if (!welds.length) return;
     const dimSegs = collectDimScreenSegs(allScreenPmis, mvp);
-    const DIM_CLEAR_PX = 5;
+    const DIM_CLEAR_PX = 7; // v523: 5→7(番号の丸と寸法補助線のすき間を少し広く)
     const rectHitsDim = (r) => { for (const [a, b] of dimSegs) if (segTouchesRect(a, b, r, DIM_CLEAR_PX)) return true; return false; };
+    const rectDimCount = (r) => { let n = 0; for (const [a, b] of dimSegs) if (segTouchesRect(a, b, r, DIM_CLEAR_PX)) n++; return n; }; // v523
     const leaderDimCrosses = (a, b) => { let n = 0; for (const [c, d] of dimSegs) if (segCrossesSeg(a, b, c, d)) n++; return n; };
     // 指示線が寸法補助線・寸法線に沿って重なる(ほぼ平行で近い)割合。交差の本数では数えられない
     // 「寸法補助線とかぶる」状態を見つける。モデル側の端(tip)の手前10pxは数えない。
@@ -18664,8 +18665,11 @@ pmi._lineFarPoint = null;
             // 向きのルール(真横・上)どおりでも寸法線の上に乗る置き場所より、ルールから
             // 外れても寸法線と重ならない置き場所を選ぶようにする。
             if (rectHitsDim(c.rect)) u += 30000;
-            u += Math.min(4, leaderDimCrosses(c.K, c.O)) * 3000;
-            if (leaderDimNear(c.K, c.O) > 0.1) u += 8000;
+            // v523: 「寸法補助線と指示線とバルーンができる限り重ならないように」との要望。
+            // 指示線が寸法補助線・寸法線を横切る本数と、沿って重なる割合の減点を大きくし
+            // (以前は 1本3000 / 割合0.1超で8000)、真横・上の向きのルールより優先して避ける。
+            u += Math.min(4, leaderDimCrosses(c.K, c.O)) * 12000;
+            { const nr = leaderDimNear(c.K, c.O); if (nr > 0) u += 6000 + nr * 30000; }
             for (const r of sRects) { if (ov(c.rect, r, 6)) u += 50000; if (segTouchesRect(c.K, c.O, r, 3)) u += 50000; }
             for (const [a, b] of sLeaders) { if (segX(c.O, c.K, a, b)) u += 50000; if (segTouchesRect(a, b, c.rect, 3)) u += 50000; }
             u += leaderLenPenalty(Math.hypot(c.K.x - c.O.x, c.K.y - c.O.y)) * 0.5;
@@ -18711,7 +18715,7 @@ pmi._lineFarPoint = null;
           // v519: 真横・上の向きでは、モデル・寸法線・寸法補助線と重ならない置き場所が無いときは、
           // 指している点のまわり全方向(15°ごと)から、モデルの外側(空いている側)を優先して探す。
           // 置き場所が1つも無いと番号が元の位置(モデルの上)に残ってしまうため、その場合も同様。
-          const clean = (c) => c.u < 30000 && !rectHitsDim(c.rect) && leaderDimCrosses(c.K, c.O) === 0;
+          const clean = (c) => c.u < 30000 && !rectHitsDim(c.rect) && leaderDimCrosses(c.K, c.O) === 0 && leaderDimNear(c.K, c.O) === 0; // v523
           if (!cands.some(clean)) {
             let ox = O.x - modelCx, oy = O.y - modelCy;
             const ol = Math.hypot(ox, oy);
@@ -18741,9 +18745,11 @@ pmi._lineFarPoint = null;
                 if (!inCanvas(c.rect)) continue;
                 let soft = 0;
                 const om = rectOnModel(c.rect);
-                if (om > 0) soft += 25000 + om * 20000;
+                // v523: 寸法の線を避ける減点を大きくしたので、モデルに乗る・ほかの部品を横切る減点は
+                // それより必ず大きくする(寸法の線を避けるために番号をモデルの上に置かない)
+                if (om > 0) soft += 120000 + om * 40000;
                 const fr = noteLeaderOtherFrac(cover, c.K, c.O, w);
-                if (fr > 0) soft += 15000 + fr * 20000;
+                if (fr > 0) soft += 80000 + fr * 40000;
                 c.base = deg;
                 c.rule = 6000 + soft + D * 2;
                 c.u = unary(c) + c.rule;
@@ -18872,11 +18878,16 @@ pmi._lineFarPoint = null;
           // v509: 向きのルールの候補だけでは番号どうし(や指示線)の重なりが避けられないときは、
           // 重なっている番号に「ルールから外れた置き場所(指示点のまわり全方向)」の候補を加えて解き直す。
           // 重なりを無くすことを、真横・上の向きのルールより優先する(ルールから外れる分は減点)。
-          if (bestV >= 50000) {
+          // v523: 寸法補助線・寸法線にかかる番号・指示線が残ったときも、全方向の候補を加えて解き直す
+          const dimBad = (c) => rectHitsDim(c.rect) || leaderDimCrosses(c.K, c.O) > 0 || leaderDimNear(c.K, c.O) > 0;
+          if (bestV >= 50000 || items.some((it, i) => dimBad(it.cands[best[i]]))) {
             const bad = new Set();
+            const dimOnly = new Set(); // v523: 寸法の線にかかるだけの番号(モデルに乗せてまで避けない)
+            const pairBad = new Set(); // v523: 番号どうしが重なっている番号(これだけはモデルに少しかかってでも避ける)
             for (let i = 0; i < n; i++) {
-              if (items[i].cands[best[i]].u >= 50000) bad.add(i);
-              for (let j = i + 1; j < n; j++) if (pc(i, best[i], j, best[j]) >= 50000) { bad.add(i); bad.add(j); }
+              if (items[i].cands[best[i]].u < 50000 && dimBad(items[i].cands[best[i]])) dimOnly.add(i);
+              if (items[i].cands[best[i]].u >= 50000 || dimBad(items[i].cands[best[i]])) bad.add(i);
+              for (let j = i + 1; j < n; j++) if (pc(i, best[i], j, best[j]) >= 50000) { bad.add(i); bad.add(j); pairBad.add(i); pairBad.add(j); }
             }
             for (const i of bad) {
               const it = items[i];
@@ -18893,8 +18904,10 @@ pmi._lineFarPoint = null;
                   if (!inCanvas(c.rect)) continue;
                   let soft = 0;
                   const om = rectOnModel(c.rect);
+                  if (om > 0 && !pairBad.has(i)) continue; // v523: 寸法の線を避けるためにモデルへは乗せない
                   if (om > 0) soft += 25000 + om * 10000;
                   const fr = noteLeaderOtherFrac(cover, c.K, c.O, it.w);
+                  if (fr > 0 && !pairBad.has(i)) continue; // v523: 同上(指示線をほかの部品の上に通さない)
                   if (fr > 0) soft += 15000 + fr * 20000;
                   c.base = it.w._ruleSide != null ? it.w._ruleSide : 0;
                   c.rule = 6000 + dev * 40 + D * 2 + soft;
@@ -19021,8 +19034,8 @@ pmi._lineFarPoint = null;
         for (const [a, b] of otherLeaders) if (segTouchesRect(a, b, rect, 3)) c += 4000;
         // v499: 番号の丸・記号の枠が寸法線・寸法補助線に重なる / 指示線が寸法補助線を横切る
         if (rectHitsDim(rect)) c += 4000; // v503: 番号が寸法線に乗るのも、指示線どうしの重なりと同じくらい避ける
-        c += Math.min(4, leaderDimCrosses(ev.K, tip.screen)) * 700;
-        c += leaderDimNear(ev.K, tip.screen) * 3000;
+        c += Math.min(4, leaderDimCrosses(ev.K, tip.screen)) * 3000; // v523: 700→3000
+        c += leaderDimNear(ev.K, tip.screen) * 12000;                 // v523: 3000→12000
         if (rect.x0 < 4 || rect.y0 < Math.max(4, ribbonBottom + 4) || rect.x1 > cw - 4 || rect.y1 > ch - 4) c += 2500;
         for (const b of banned) if (ov(rect, b, 0)) { c += 2500; break; }
         // v504: 「重なり」は、指示線の長さなどの見た目の好みより必ず優先して避ける。
@@ -19036,7 +19049,8 @@ pmi._lineFarPoint = null;
           for (const [a, b] of otherLeaders) if (segX(tip.screen, ev.K, a, b) || segTouchesRect(a, b, rect, 3)) hard++;
           for (const r of otherRects) if (segTouchesRect(ev.K, tip.screen, r, 3)) hard++;
           if (isNote && tip.frac > 0) hard++;
-          if (leaderDimNear(ev.K, tip.screen) > 0.1) hard++;
+          if (leaderDimNear(ev.K, tip.screen) > 0.05) hard++; // v523: 0.1→0.05
+          if (leaderDimCrosses(ev.K, tip.screen) > 0) hard++; // v523: 指示線が寸法補助線を横切るのも重なりとして扱う
           c += hard * 20000;
         }
         // v501: 指示線の長さ(番号の丸・記号の縁からモデル側の点まで)が長いほど不利にする
