@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v517</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v519</div>
   <!-- v338: 寸法値の位置決めロジック(render()内)が実際に毎フレーム
        計算している値を、画面上でそのまま確認できる簡易デバッグ表示。
        選択中のPMIが寸法のときだけ表示される。開発者ツールを開かなくても
@@ -8830,6 +8830,66 @@
   // 紛れない、はっきりした色に変更(指示面: マゼンタ、基準データムの面: 黄色)
   const COLOR_PMI_FACE = hexToRgb01('#FF2BC8'); // v472: 選んだPMIが指示している面
   const COLOR_PMI_DATUM_FACE = hexToRgb01('#FFE81A'); // v473: 公差記入枠の基準データム(A・B…)の面
+  // v518: 照合番号の丸(実際の輪郭の多角形で描くis-note-outlined)に指示線が届かず、
+  // 斜めに出る指示線だけ丸から離れて見えていた。指示線はタグの四角い範囲の縁で
+  // 止めていたが、丸はその四角の内側に描かれるため、斜め方向では四角の角と丸の
+  // あいだにすき間ができていた(真上・真横では四角と丸が接するので気づきにくい)。
+  // 輪郭の描画と指示線の止め位置で同じ形を使えるよう、画面上の輪郭の点を求める
+  // 処理をここにまとめる。
+  function noteOutlineScreenPoints(pmi, rect) {
+    const local2D = pmi && pmi.noteOutlineLocal2D;
+    if (!local2D || local2D.length < 3 || !rect || rect.width <= 0 || rect.height <= 0) return null;
+    const INSET = 1.5;
+    const dstW = Math.max(1, rect.width - INSET * 2), dstH = Math.max(1, rect.height - INSET * 2);
+    const dstCx = rect.left + rect.width / 2, dstCy = rect.top + rect.height / 2;
+    if (local2D.length === 4) {
+      const side = (i) => Math.hypot(local2D[(i + 1) % 4][0] - local2D[i][0], local2D[(i + 1) % 4][1] - local2D[i][1]);
+      const e1 = (side(0) + side(2)) / 2, e2 = (side(1) + side(3)) / 2;
+      const r = Math.max(e1, e2) / Math.max(1e-9, Math.min(e1, e2));
+      let w, h;
+      if (r < 1.35) { w = h = Math.max(dstW, dstH); }
+      else {
+        const wide = dstW >= dstH;
+        const rr = wide ? r : 1 / r;
+        w = Math.max(dstW, dstH * rr); h = w / rr;
+        if (h < dstH) { h = dstH; w = h * rr; }
+      }
+      return [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]].map((q) => [dstCx + q[0], dstCy + q[1]]);
+    }
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const p of local2D) {
+      if (p[0] < minX) minX = p[0]; if (p[0] > maxX) maxX = p[0];
+      if (p[1] < minY) minY = p[1]; if (p[1] > maxY) maxY = p[1];
+    }
+    const srcW = Math.max(1e-6, maxX - minX), srcH = Math.max(1e-6, maxY - minY);
+    const scale = Math.min(dstW / srcW, dstH / srcH);
+    return local2D.map((p) => {
+      const nx = (p[0] - minX) / srcW - 0.5, ny = (p[1] - minY) / srcH - 0.5;
+      return [dstCx + nx * srcW * scale, dstCy + ny * srcH * scale];
+    });
+  }
+  // 中心Cから点Oへ向かう線が、多角形の輪郭と交わる点(Cに近い側)。交わらなければnull。
+  function rayPolygonExit(C, O, pts) {
+    const dx = O.x - C.x, dy = O.y - C.y;
+    let best = Infinity;
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i], b = pts[(i + 1) % pts.length];
+      const ex = b[0] - a[0], ey = b[1] - a[1];
+      const den = dx * ey - dy * ex;
+      if (Math.abs(den) < 1e-12) continue;
+      const ax = a[0] - C.x, ay = a[1] - C.y;
+      const t = (ax * ey - ay * ex) / den;
+      const u = (ax * dy - ay * dx) / den;
+      if (t > 0 && u >= -1e-9 && u <= 1 + 1e-9 && t < best) best = t;
+    }
+    if (!isFinite(best)) return null;
+    best = Math.min(best, 1);
+    return { x: C.x + dx * best, y: C.y + dy * best };
+  }
+  // 丸い輪郭(4点の四角以外)で描く注記か
+  function isRoundNoteOutline(pmi) {
+    return !!(pmi && pmi.noteOutlineLocal2D && pmi.noteOutlineLocal2D.length > 4);
+  }
   function buildModelBuffers(modelData) {
     bboxLineData = gl ? makeLineBuffer(bboxWireframeSegments()) : null;
     modelFaceRangeMap = null;
@@ -18525,6 +18585,15 @@ pmi._lineFarPoint = null;
       for (const p of notes) minTop = Math.min(minTop, topOf(p._bomNum));
       if (minTop < Infinity) for (const p of notes) if (topOf(p._bomNum) <= minTop + 2) topBalloons.add(p);
     } catch (e) { /* ルールの上下判定ができなければ、すべて真横 */ }
+    // v519: モデル全体の画面上の中心(外側=空いている側へ照合番号を出すための目安)。
+    // 画面を粗い格子で調べ、モデルが写っている点の平均をとる。
+    let modelCx = cw / 2, modelCy = ch / 2;
+    { let sx = 0, sy = 0, k = 0;
+      for (let i = 0; i < 32; i++) for (let j = 0; j < 32; j++) {
+        const x = cw * (i + 0.5) / 32, y = ch * (j + 0.5) / 32;
+        if (cover.at(x, y)) { sx += x; sy += y; k++; }
+      }
+      if (k) { modelCx = sx / k; modelCy = sy / k; } }
     // v508: 照合番号をまとめて決める(全体最適化)。
     // これまでは1つずつ順に置いていたため、先に置いた番号が良い場所を取り、後の番号が
     // 重なりを我慢することがあった。ここでは、
@@ -18572,15 +18641,18 @@ pmi._lineFarPoint = null;
           const evalB = (P) => {
             const rect = { x0: P.x - g.w / 2, x1: P.x + g.w / 2, y0: P.y - g.h / 2, y1: P.y + g.h / 2 };
             const dx = O.x - P.x, dy = O.y - P.y, d = Math.hypot(dx, dy) || 1;
-            const K = w.noteShape === 'circle' ? { x: P.x + dx / d * Math.min(rad, d), y: P.y + dy / d * Math.min(rad, d) } : startOf(P, rect, O);
+            const K = (w.noteShape === 'circle' || isRoundNoteOutline(w)) ? { x: P.x + dx / d * Math.min(rad, d), y: P.y + dy / d * Math.min(rad, d) } : startOf(P, rect, O);
             return { P, rect, K, O };
           };
           const okStatic = (c) => inCanvas(c.rect) && rectOnModel(c.rect) === 0 && noteLeaderOtherFrac(cover, c.K, c.O, w) === 0;
           const unary = (c) => {
             let u = 0;
-            if (rectHitsDim(c.rect)) u += 8000;
-            u += Math.min(4, leaderDimCrosses(c.K, c.O)) * 300;
-            if (leaderDimNear(c.K, c.O) > 0.1) u += 3000;
+            // v519: 寸法線・寸法補助線との重なりを重く見る(以前は 8000 / 300 / 3000)。
+            // 向きのルール(真横・上)どおりでも寸法線の上に乗る置き場所より、ルールから
+            // 外れても寸法線と重ならない置き場所を選ぶようにする。
+            if (rectHitsDim(c.rect)) u += 30000;
+            u += Math.min(4, leaderDimCrosses(c.K, c.O)) * 3000;
+            if (leaderDimNear(c.K, c.O) > 0.1) u += 8000;
             for (const r of sRects) { if (ov(c.rect, r, 6)) u += 50000; if (segTouchesRect(c.K, c.O, r, 3)) u += 50000; }
             for (const [a, b] of sLeaders) { if (segX(c.O, c.K, a, b)) u += 50000; if (segTouchesRect(a, b, c.rect, 3)) u += 50000; }
             u += leaderLenPenalty(Math.hypot(c.K.x - c.O.x, c.K.y - c.O.y)) * 0.5;
@@ -18621,6 +18693,29 @@ pmi._lineFarPoint = null;
           if (!cands.some((c) => c.u < 50000)) {
             for (const t of [5, -5, 10, -10, 15, -15]) for (const b of bases) addDir(b, t, 0);
             if (isTop && !cands.some((c) => c.u < 50000)) for (const b of [0, 180]) for (const t of [0, 5, -5, 10, -10, 15, -15]) addDir(b, t, 3000);
+          }
+          // v519: 真横・上の向きでは、モデル・寸法線・寸法補助線と重ならない置き場所が無いときは、
+          // 指している点のまわり全方向(15°ごと)から、モデルの外側(空いている側)を優先して探す。
+          // 置き場所が1つも無いと番号が元の位置(モデルの上)に残ってしまうため、その場合も同様。
+          const clean = (c) => c.u < 30000 && !rectHitsDim(c.rect) && leaderDimCrosses(c.K, c.O) === 0;
+          if (!cands.some(clean)) {
+            let ox = O.x - modelCx, oy = O.y - modelCy;
+            const ol = Math.hypot(ox, oy);
+            if (ol > 1) { ox /= ol; oy /= ol; } else { ox = 0; oy = -1; }
+            const ruleDeg = isTop ? -90 : null;
+            for (let k = 0; k < 24; k++) {
+              const deg = k * 15, a = deg * Math.PI / 180, ux = Math.cos(a), uy = Math.sin(a);
+              const dev = ruleDeg == null ? Math.min(Math.abs(((deg + 180) % 360) - 180), Math.abs(((deg + 360) % 360) - 180)) : Math.abs(((deg - ruleDeg + 540) % 360) - 180);
+              const inward = (1 - (ux * ox + uy * oy)) / 2; // 0: 外向き 〜 1: モデルの中心向き
+              for (let D = rad + 8; D <= rad + LEADER_HARD_PX * 1.4; D += 8) {
+                const c = evalB({ x: O.x + ux * D, y: O.y + uy * D });
+                if (!okStatic(c)) continue;
+                c.base = deg;
+                c.rule = 3000 + dev * 25 + inward * 2500 + Math.abs(D - D0) * 3;
+                c.u = unary(c) + c.rule;
+                cands.push(c);
+              }
+            }
           }
           if (!cands.length) continue;
           cands.sort((a, b) => a.u - b.u);
@@ -18816,7 +18911,7 @@ pmi._lineFarPoint = null;
           // 照合番号: 指示線は番号の丸の縁からOへの直線(丸のときは円、四角のときは枠で止める)
           const dx = O0.x - P.x, dy = O0.y - P.y, d = Math.hypot(dx, dy) || 1;
           const rad = Math.min(rect.x1 - rect.x0, rect.y1 - rect.y0) / 2;
-          const S = w.noteShape === 'circle' ? { x: P.x + dx / d * Math.min(rad, d), y: P.y + dy / d * Math.min(rad, d) } : startOf(P, rect, O0);
+          const S = (w.noteShape === 'circle' || isRoundNoteOutline(w)) ? { x: P.x + dx / d * Math.min(rad, d), y: P.y + dy / d * Math.min(rad, d) } : startOf(P, rect, O0);
           return { tip: { local: null, screen: O0, frac: noteLeaderOtherFrac(cover, S, O0, w) }, K: S, rect };
         }
         const k1 = weldKneeFor(P, rect, O0, ko);
@@ -18946,8 +19041,8 @@ pmi._lineFarPoint = null;
             const st = steps[i];
             let tangle = tangleOf(st.ev);
             for (const r of otherRects) if (ov(st.ev.rect, r, 6)) { tangle++; break; }
-            const c = (tangle ? 50000 * tangle : 0) + (rectHitsDim(st.ev.rect) ? 8000 : 0) +
-              leaderDimCrosses(st.ev.K, st.ev.tip.screen) * 300 + Math.abs(st.D - target) * 4;
+            const c = (tangle ? 50000 * tangle : 0) + (rectHitsDim(st.ev.rect) ? 30000 : 0) +
+              Math.min(4, leaderDimCrosses(st.ev.K, st.ev.tip.screen)) * 3000 + Math.abs(st.D - target) * 4; // v519
             if (!bestS || c < bestS.c) bestS = { P: st.P, c, tangle };
           }
           return bestS;
@@ -21632,7 +21727,13 @@ pmi._lineFarPoint = null;
               const isCircle = tagEl.classList.contains('is-note-circle');
               const ddx = targetX - modelScreen.x, ddy = targetY - modelScreen.y;
               const distToCenter = Math.hypot(ddx, ddy) || 1;
-              if (isCircle) {
+              // v518: 実際の輪郭(丸など)で描く注記は、その輪郭の線で指示線を止める
+              const outlinePts = tagEl.classList.contains('is-note-outlined') ? noteOutlineScreenPoints(pmi, rect) : null;
+              const hitOutline = outlinePts ? rayPolygonExit({ x: targetX, y: targetY }, modelScreen, outlinePts) : null;
+              if (hitOutline) {
+                clipX = hitOutline.x;
+                clipY = hitOutline.y;
+              } else if (isCircle) {
                 const radius = Math.min(rect.width, rect.height) / 2;
                 const t = Math.max(0, (distToCenter - radius) / distToCenter);
                 clipX = modelScreen.x + ddx * t;
@@ -22394,44 +22495,9 @@ pmi._lineFarPoint = null;
           // は対象外)については、実際の重心・重心からの平均距離・最初の
           // 頂点の向き(回転)は保ったまま、辺の長さを揃えた正方形に
           // 置き換えて表示する。
-          const INSET = 1.5;
-          const dstW = Math.max(1, rect.width - INSET * 2), dstH = Math.max(1, rect.height - INSET * 2);
-          const dstCx = rect.left + rect.width / 2, dstCy = rect.top + rect.height / 2;
-          let pts;
-          if (local2D.length === 4) {
-            // v343〜v344: 四角い囲み線は、上下左右が水平・垂直な□で描く(ひし形・平行四辺形に見えないように)。
-            // v446: 「B4 G5」のような横長の注記で、枠が中央の「4 G」だけを囲んでいた。v343で
-            // どの四角も正方形に置き換え、しかもその大きさをタグの低い方の辺(高さ)に合わせていた
-            // ためだった。ファイルの辺の長さの比を見て、正方形に近いものだけ□にし、横長のものは
-            // その縦横比のままの長方形にする。どちらも文字全体を囲む大きさにする。
-            const side = (i) => Math.hypot(local2D[(i + 1) % 4][0] - local2D[i][0], local2D[(i + 1) % 4][1] - local2D[i][1]);
-            const e1 = (side(0) + side(2)) / 2, e2 = (side(1) + side(3)) / 2;
-            const r = Math.max(e1, e2) / Math.max(1e-9, Math.min(e1, e2));
-            let w, h;
-            if (r < 1.35) { w = h = Math.max(dstW, dstH); }
-            else {
-              const wide = dstW >= dstH; // 文字の並びに合わせて長い辺を横(縦書きなら縦)にする
-              const rr = wide ? r : 1 / r;
-              w = Math.max(dstW, dstH * rr); h = w / rr;
-              if (h < dstH) { h = dstH; w = h * rr; }
-            }
-            pts = [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]]
-              .map((q) => (dstCx + q[0]) + ',' + (dstCy + q[1])).join(' ');
-          } else {
-            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-            for (const s of local2D) {
-              if (s[0] < minX) minX = s[0]; if (s[0] > maxX) maxX = s[0];
-              if (s[1] < minY) minY = s[1]; if (s[1] > maxY) maxY = s[1];
-            }
-            const srcW = Math.max(1e-6, maxX - minX), srcH = Math.max(1e-6, maxY - minY);
-            // v341: X・Yを同じ1つの倍率で拡大縮小し、実際の形(角度・縦横比)を保ったまま
-            // タグの矩形の中央に置く(別々の倍率だと斜めの輪郭が歪むため)。
-            const scale = Math.min(dstW / srcW, dstH / srcH);
-            pts = local2D.map((s) => {
-              const nx = (s[0] - minX) / srcW - 0.5, ny = (s[1] - minY) / srcH - 0.5;
-              return (dstCx + nx * srcW * scale) + ',' + (dstCy + ny * srcH * scale);
-            }).join(' ');
-          }
+          const ptsArr = noteOutlineScreenPoints(pmi, rect); // v518: 指示線の止め位置と同じ形
+          if (!ptsArr) continue;
+          const pts = ptsArr.map((q) => q[0] + ',' + q[1]).join(' ');
           polys.push(
             '<polygon points="' + pts + '"' + pmiFadeAttr(pmi) + ' fill="none" stroke="' +
             colorToCss(pmi.id === selectedId ? COLOR_HIGHLIGHT : [0.96, 0.98, 0.97]) +
