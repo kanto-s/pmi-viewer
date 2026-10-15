@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v523</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v524</div>
   <!-- v338: 寸法値の位置決めロジック(render()内)が実際に毎フレーム
        計算している値を、画面上でそのまま確認できる簡易デバッグ表示。
        選択中のPMIが寸法のときだけ表示される。開発者ツールを開かなくても
@@ -1310,6 +1310,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v524: 寸法(寸法線・寸法補助線・寸法値・矢印)は、ふわっと浮かび上がらずにすぐはっきり表示するようにしました。また、モデルを動かしている間に寸法が出たり消えたりを小刻みに繰り返さないよう、表示・非表示が切り替わった直後0.5秒はその状態を保つようにしました</li>
         <li>v517: モデルを動かしている間に、照合番号(バルーン)などの注記が小刻みに震える(微動する)のをなくしました(置き場所がはっきり変わるとき以外は、指している点と一緒になめらかに動きます)
         <li>v517: モデルを動かしている間に、照合番号(バルーン)などの注記や溶接記号が小刻みに震える(微動する)のを抑えました。置き場所がはっきり変わるとき以外は、指している点と一緒になめらかに動きます。照合番号の置き場所選びも、前のコマの置き場所(指している点から見た位置)を強く優先し、同じ状況なら毎回同じ結果になるようにしました
         <li>v516: モデルの回転を止めた直後に、照合番号(バルーン)などの注記が少しずれる動きをなくしました(止めたときの位置のままにします)
@@ -19698,16 +19699,17 @@ pmi._lineFarPoint = null;
       const facing = n ? Math.abs(n.x * dirL.x + n.y * dirL.y + n.z * dirL.z) : 0.5;
       if (pmi._diamPlaneNormalLocal && facing < 0.42) continue;         // 真横(もともと隠れる)
       if (pmi.id === selectedId) continue;                              // 選択中は常に表示
+      if (pmi._dimHoldHide) { pmi._dimThinHidden = true; continue; }   // v524: 消えた直後は出さない(場所も取らない)
       const a = pmi._markerAnchor || pmi.anchor || [0, 0, 0];
       const depth = a[0] * dirL.x + a[1] * dirL.y + a[2] * dirL.z;       // 大きいほどカメラに近い
-      cands.push({ pmi, facing: stableQuant(pmi, '_dimFacingQ', facing, 0.05), depth, turn: dimTurnHash(pmi.id, viewBin) });
+      cands.push({ pmi, facing: stableQuant(pmi, '_dimFacingQ', facing, 0.05), depth, turn: dimTurnHash(pmi.id, viewBin), hold: pmi._dimHoldShow ? 1 : 0 });
     }
     if (!cands.length) return;
     // v407: 向きが同じくらいの寸法どうし(重ねて並んだ寸法など)は、以前は「手前の方」
     // で決めていたため、どの向きでも毎回同じ寸法が負け、「どんなに傾けても表示されない
     // 寸法」が出ていた。見る方向(約20°刻み)ごとに変わる順番で決めることで、
     // 傾けると別の寸法が表示されるようにする(同じ向きの範囲内では入れ替わらない)。
-    cands.sort((p, q) => (q.facing - p.facing) || (q.turn - p.turn));
+    cands.sort((p, q) => (q.hold - p.hold) || (q.facing - p.facing) || (q.turn - p.turn)); // v524: 出た直後の寸法を先に残す
     if (dimThinAuto && mvp) {
       // 自動: 読みやすい順に見ていき、すでに表示すると決めた寸法値(と選択中の
       // 寸法)に画面上で近すぎるものは隠す。拡大すると間隔が広がるので多く、
@@ -19868,6 +19870,8 @@ pmi._lineFarPoint = null;
   const PMI_FADE_MS = 450;
   let pmiFadeLastT = 0;
   function pmiFadeAlpha(pmi) {
+    // v524: 寸法(寸法線・寸法補助線・寸法値・矢印)は「ふわっと」浮かび上がらせず、常にはっきり表示する
+    if (pmi && pmi.category === 'dimension') return 1;
     const a = pmi && pmi._fadeA != null ? pmi._fadeA : 0;
     const t = Math.max(0, Math.min(1, a));
     return t * t * (3 - 2 * t); // なめらかに(はじめと終わりをゆっくり)
@@ -19885,7 +19889,21 @@ pmi._lineFarPoint = null;
   // v511: 「ふわっと消える」のは不要との指摘を受け、消えるときは従来どおり即座に消す
   // (フェードは表示されるときだけ)。
   const PMI_FADE_OUT = false;
+  // v524: 寸法が出たり消えたりを小刻みに繰り返さないよう、表示・非表示が切り替わった直後は
+  // DIM_HOLD_MS のあいだその状態を保つ(表示中なら消える直前の状態のまま描き続け、
+  // 非表示中なら出さない)。透明度は変えない(パッと切り替わる)。
+  const DIM_HOLD_MS = 500;
+  function updateDimHolds() {
+    const now = performance.now();
+    for (const pmi of pmiList) {
+      if (pmi.category !== 'dimension') continue;
+      const recent = pmi._dimChangedAt != null && now - pmi._dimChangedAt < DIM_HOLD_MS && isCategoryVisible(pmi);
+      pmi._dimHoldShow = recent && pmi._dimShownState === true;
+      pmi._dimHoldHide = recent && pmi._dimShownState === false && pmi.id !== selectedId;
+    }
+  }
   function canGhostPmi(pmi) {
+    if (pmi.category === 'dimension') return !pmi._ghost && !!pmi._dimHoldShow && !!pmi._fadeShown;
     return PMI_FADE_OUT && !pmi._ghost && pmi._fadeShown && (pmi._fadeA || 0) > 0.01;
   }
   function restorePmiGhosts() {
@@ -19905,8 +19923,14 @@ pmi._lineFarPoint = null;
     const step = dt / PMI_FADE_MS;
     let animating = false;
     for (const pmi of pmiList) {
-      const shown = !pmi._ghost && isCategoryVisible(pmi) && !pmi._markerOccluded && !pmi._farOccluded &&
-        !pmi._dimWholeHidden && !pmi._diamHideRealGraphic && !pmi._noModelLeader && !pmi._dimThinHidden;
+      const isDim = pmi.category === 'dimension';
+      const shown = (isDim && pmi._ghost && isCategoryVisible(pmi) && !pmi._dimWholeHidden) || // v524: 保持中の寸法は表示扱い
+        (!pmi._ghost && isCategoryVisible(pmi) && !pmi._markerOccluded && !pmi._farOccluded &&
+        !pmi._dimWholeHidden && !pmi._diamHideRealGraphic && !pmi._noModelLeader && !pmi._dimThinHidden);
+      if (isDim && shown !== pmi._dimShownState) { // v524: 寸法の表示・非表示が切り替わった時刻
+        if (pmi._dimShownState != null) pmi._dimChangedAt = now;
+        pmi._dimShownState = shown;
+      }
       const a = pmi._fadeA || 0;
       const na = shown ? Math.min(1, a + step) : (PMI_FADE_OUT ? Math.max(0, a - step) : 0);
       pmi._fadeA = na;
@@ -19916,6 +19940,7 @@ pmi._lineFarPoint = null;
       if (na > 0 && na < 1) animating = true;
     }
     if (animating) markRenderActive(120);
+    if (pmiList.some((q) => q._dimHoldShow || q._dimHoldHide)) markRenderActive(DIM_HOLD_MS + 50); // v524: 保持が切れたら描き直す
   }
   let viewportBgRgb = null; // v511
   function render() {
@@ -19925,6 +19950,7 @@ pmi._lineFarPoint = null;
   }
   function renderFrame() {
     restorePmiGhosts();
+    try { updateDimHolds(); } catch (e) { console.warn('updateDimHolds failed:', e); }
     if (!pmiGeometryDirty && performance.now() > renderActiveUntil && performance.now() > declutterSettleUntil) {
       requestAnimationFrame(render);
       return;
@@ -20543,8 +20569,8 @@ pmi._lineFarPoint = null;
           const allSegHidden = Array.isArray(segs) && segs.length > 0 && segs.every((v) => !v);
           // v491: 寸法補助線が描けない向きでは、寸法線・寸法値・矢印もまとめて消す
           const jisG = (pmi._dimArrowLinePoints && pmi._dimArrowLinePoints.length === 2) ? jisDimScreenGeometry(mvp, pmi) : { skip: true };
-          if (pmi._markerOccluded || diamHide || allSegHidden || pmi._dimThinHidden || !jisG) {
-            if (jisG && (pmi._ghost || canGhostPmi(pmi))) {
+          if (pmi._markerOccluded || diamHide || allSegHidden || pmi._dimThinHidden || !jisG || (pmi._dimHoldHide && !pmi._ghost)) {
+            if (jisG && !pmi._dimHoldHide && (pmi._ghost || canGhostPmi(pmi))) {
               makePmiGhost(pmi); // v510: 消える寸法も、フェードアウトが終わるまでは描く
             } else {
               pmi._dimWholeHidden = true;
