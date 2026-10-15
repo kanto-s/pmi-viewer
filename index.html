@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v524</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v525</div>
   <!-- v338: 寸法値の位置決めロジック(render()内)が実際に毎フレーム
        計算している値を、画面上でそのまま確認できる簡易デバッグ表示。
        選択中のPMIが寸法のときだけ表示される。開発者ツールを開かなくても
@@ -1310,6 +1310,8 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v525: サブアセンブリを選んでいるときも、PMI(寸法・注記・溶接記号)の表示・非表示が切り替わった直後0.7秒はその状態を保つようにしました(通常表示より0.2秒長い)
+        <li>v525: 溶接記号も寸法と同じく、ふわっと浮かび上がらずにすぐはっきり表示し、表示・非表示が切り替わった直後0.5秒はその状態を保つようにしました(モデルを動かしている間に出たり消えたりを小刻みに繰り返さないため)</li>
         <li>v524: 寸法(寸法線・寸法補助線・寸法値・矢印)は、ふわっと浮かび上がらずにすぐはっきり表示するようにしました。また、モデルを動かしている間に寸法が出たり消えたりを小刻みに繰り返さないよう、表示・非表示が切り替わった直後0.5秒はその状態を保つようにしました</li>
         <li>v517: モデルを動かしている間に、照合番号(バルーン)などの注記が小刻みに震える(微動する)のをなくしました(置き場所がはっきり変わるとき以外は、指している点と一緒になめらかに動きます)
         <li>v517: モデルを動かしている間に、照合番号(バルーン)などの注記や溶接記号が小刻みに震える(微動する)のを抑えました。置き場所がはっきり変わるとき以外は、指している点と一緒になめらかに動きます。照合番号の置き場所選びも、前のコマの置き場所(指している点から見た位置)を強く優先し、同じ状況なら毎回同じ結果になるようにしました
@@ -19547,6 +19549,7 @@ pmi._lineFarPoint = null;
   // どれか1種類だけで埋まらないよう、1種類あたりまずは3件までとし、余りを埋める。
   // 選択中(タップした)PMIは常に表示する。
   const OCC_PMI_MAX_VISIBLE = 6;
+  const OCC_HOLD_MS = 700; // v525: サブアセンブリ選択中の、切り替わり直後に状態を保つ時間(通常表示の0.5秒より0.2秒長い)
   // v433: 「回転を止めた位置が境目ぎりぎりだと、表示されるPMIがばたつく」との指摘への対応。
   // 見る方向の区画(約20°刻み)や、向きの読みやすさを丸めた値が、境目の上で
   // 毎フレーム行ったり来たりしないよう、前回の値から境目を少し(区画は3°、
@@ -19592,7 +19595,16 @@ pmi._lineFarPoint = null;
       cands.push({ pmi, onScreen, facing: stableQuant(pmi, '_occFacingQ', facing, 0.1), turn: dimTurnHash(pmi.id, viewBin) });
     }
     if (cands.length <= slots) return;
-    cands.sort((p, q) => (q.onScreen - p.onScreen) || (q.facing - p.facing) || (q.turn - p.turn));
+    // v525: サブアセンブリを選んでいるときも、表示・非表示が切り替わった直後 OCC_HOLD_MS は
+    // その状態を保つ(通常表示の保持 DIM_HOLD_MS より0.2秒長い)。出た直後のものは優先して残し、
+    // 消えた直後のものはすぐには出さない。溶接記号・注記・寸法のすべてが対象。
+    const occNow = performance.now();
+    for (const c of cands) {
+      const recent = c.pmi._occChangedAt != null && occNow - c.pmi._occChangedAt < OCC_HOLD_MS;
+      c.holdShow = recent && !!c.pmi._occCapPrevShown;
+      c.holdHide = recent && !c.pmi._occCapPrevShown;
+    }
+    cands.sort((p, q) => (q.holdShow - p.holdShow) || (q.onScreen - p.onScreen) || (q.facing - p.facing) || (q.turn - p.turn));
     // v521: 「サブアセンブリを選んだとき、並んだ寸法が重なって暴れる」との指摘への対応。
     // これまでは読みやすい順に6件を選ぶだけで、画面上の間隔を見ていなかったため、
     // 直列に並んだ寸法(72.5・55・97.8・247…)が同じ場所に重なって表示されていた。
@@ -19632,7 +19644,17 @@ pmi._lineFarPoint = null;
     };
     const chosen = new Set();
     const rejected = new Set();
+    for (const c of cands) if (c.holdHide) rejected.add(c);
+    for (const c of cands) {
+      if (!c.holdShow || chosen.size >= slots) continue;
+      dimTooClose(c); // 画面上の位置だけ登録する(保持中のものは近くても残す)
+      if (c._sp) dimPts.push(c._sp);
+      if (c._seg) dimSegs.push(c._seg);
+      if (c._lr) dimRects.push(c._lr);
+      chosen.add(c);
+    }
     const perCat = {};
+    for (const c of chosen) perCat[c.pmi.category] = (perCat[c.pmi.category] || 0) + 1;
     for (const c of cands) {
       if (chosen.size >= slots) break;
       const k = c.pmi.category;
@@ -19640,7 +19662,12 @@ pmi._lineFarPoint = null;
       if (tryChoose(c)) perCat[k] = (perCat[k] || 0) + 1;
     }
     for (const c of cands) { if (chosen.size >= slots) break; tryChoose(c); }
-    for (const c of cands) c.pmi._occCapPrevShown = chosen.has(c);
+    for (const c of cands) {
+      const sh = chosen.has(c);
+      if (c.pmi._occCapPrevShown !== undefined && !!c.pmi._occCapPrevShown !== sh) c.pmi._occChangedAt = occNow;
+      c.pmi._occCapPrevShown = sh;
+    }
+    if (cands.some((c) => c.holdShow || c.holdHide)) markRenderActive(OCC_HOLD_MS + 50);
     for (const c of cands) {
       if (chosen.has(c)) continue;
       c.pmi._markerOccluded = true;
@@ -19871,7 +19898,7 @@ pmi._lineFarPoint = null;
   let pmiFadeLastT = 0;
   function pmiFadeAlpha(pmi) {
     // v524: 寸法(寸法線・寸法補助線・寸法値・矢印)は「ふわっと」浮かび上がらせず、常にはっきり表示する
-    if (pmi && pmi.category === 'dimension') return 1;
+    if (pmi && (pmi.category === 'dimension' || pmi.category === 'weld')) return 1; // v525: 溶接記号も同じ
     const a = pmi && pmi._fadeA != null ? pmi._fadeA : 0;
     const t = Math.max(0, Math.min(1, a));
     return t * t * (3 - 2 * t); // なめらかに(はじめと終わりをゆっくり)
@@ -19893,17 +19920,25 @@ pmi._lineFarPoint = null;
   // DIM_HOLD_MS のあいだその状態を保つ(表示中なら消える直前の状態のまま描き続け、
   // 非表示中なら出さない)。透明度は変えない(パッと切り替わる)。
   const DIM_HOLD_MS = 500;
+  // v525: 溶接記号も寸法と同じく、切り替わった直後 DIM_HOLD_MS はその状態を保つ
+  const isHoldCat = (pmi) => pmi.category === 'dimension' || pmi.category === 'weld';
+  let weldHoldActivePrev = false;
   function updateDimHolds() {
     const now = performance.now();
+    let weldHoldActive = false;
     for (const pmi of pmiList) {
-      if (pmi.category !== 'dimension') continue;
+      if (!isHoldCat(pmi)) continue;
       const recent = pmi._dimChangedAt != null && now - pmi._dimChangedAt < DIM_HOLD_MS && isCategoryVisible(pmi);
       pmi._dimHoldShow = recent && pmi._dimShownState === true;
       pmi._dimHoldHide = recent && pmi._dimShownState === false && pmi.id !== selectedId;
+      if (pmi.category === 'weld' && (pmi._dimHoldShow || pmi._dimHoldHide)) weldHoldActive = true;
     }
+    // 溶接記号の保持が切れたら、表示・非表示の判定をやり直す(視点が止まっていても反映する)
+    if (weldHoldActivePrev && !weldHoldActive) lastOcclusionRotation = null;
+    weldHoldActivePrev = weldHoldActive;
   }
   function canGhostPmi(pmi) {
-    if (pmi.category === 'dimension') return !pmi._ghost && !!pmi._dimHoldShow && !!pmi._fadeShown;
+    if (isHoldCat(pmi)) return !pmi._ghost && !!pmi._dimHoldShow && !!pmi._fadeShown;
     return PMI_FADE_OUT && !pmi._ghost && pmi._fadeShown && (pmi._fadeA || 0) > 0.01;
   }
   function restorePmiGhosts() {
@@ -19923,7 +19958,7 @@ pmi._lineFarPoint = null;
     const step = dt / PMI_FADE_MS;
     let animating = false;
     for (const pmi of pmiList) {
-      const isDim = pmi.category === 'dimension';
+      const isDim = isHoldCat(pmi); // v525: 溶接記号も含む
       const shown = (isDim && pmi._ghost && isCategoryVisible(pmi) && !pmi._dimWholeHidden) || // v524: 保持中の寸法は表示扱い
         (!pmi._ghost && isCategoryVisible(pmi) && !pmi._markerOccluded && !pmi._farOccluded &&
         !pmi._dimWholeHidden && !pmi._diamHideRealGraphic && !pmi._noModelLeader && !pmi._dimThinHidden);
@@ -20221,11 +20256,12 @@ pmi._lineFarPoint = null;
           const visibleWelds = [];
           for (const pmi of pmiList) {
             if (pmi.category !== 'weld' || pmi._markerOccluded) continue;
+            if (pmi._dimHoldHide) { pmi._markerOccluded = true; pmi._farOccluded = true; continue; } // v525: 消えた直後は出さない
             const key = pmi._markerAnchor || pmi.anchor;
             if (!key) continue;
             // v433: 直前に表示していたものを少し有利にして、僅差での入れ替わりを防ぐ
             const depthFromCenter = (key[0] - boundsCenter.x) * dirLocal.x + (key[1] - boundsCenter.y) * dirLocal.y + (key[2] - boundsCenter.z) * dirLocal.z +
-              (pmi._weldPrevShown ? occMargin : 0);
+              (pmi._weldPrevShown ? occMargin : 0) + (pmi._dimHoldShow ? 1e9 : 0); // v525: 出た直後のものを先に残す
             visibleWelds.push({ pmi, depthFromCenter });
           }
           visibleWelds.sort((a, b) => b.depthFromCenter - a.depthFromCenter);
@@ -20234,6 +20270,8 @@ pmi._lineFarPoint = null;
             visibleWelds[k].pmi._farOccluded = true;
           }
         }
+        // v525: 正面・側面の振り分けで隠れる場合も含め、消えた直後の溶接記号は出さない
+        for (const pmi of pmiList) if (pmi.category === 'weld' && pmi._dimHoldHide && pmi.id !== selectedId) { pmi._markerOccluded = true; pmi._farOccluded = true; }
         for (const pmi of pmiList) if (pmi.category === 'weld') pmi._weldPrevShown = !pmi._markerOccluded;
       }
     } else {
