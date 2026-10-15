@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v520</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v521</div>
   <!-- v338: 寸法値の位置決めロジック(render()内)が実際に毎フレーム
        計算している値を、画面上でそのまま確認できる簡易デバッグ表示。
        選択中のPMIが寸法のときだけ表示される。開発者ツールを開かなくても
@@ -19578,16 +19578,50 @@ pmi._lineFarPoint = null;
     }
     if (cands.length <= slots) return;
     cands.sort((p, q) => (q.onScreen - p.onScreen) || (q.facing - p.facing) || (q.turn - p.turn));
+    // v521: 「サブアセンブリを選んだとき、並んだ寸法が重なって暴れる」との指摘への対応。
+    // これまでは読みやすい順に6件を選ぶだけで、画面上の間隔を見ていなかったため、
+    // 直列に並んだ寸法(72.5・55・97.8・247…)が同じ場所に重なって表示されていた。
+    // 通常表示と同じく、すでに表示すると決めた寸法値に画面上で DIM_AUTO_MIN_SEP_PX より
+    // 近い寸法は選ばない(直前に表示していたものは少し近くても残す=ヒステリシス)。
+    const dimPts = [], dimSegs = [];
+    if (lastMVP && selectedId) {
+      const selPmi = pmiList.find((q) => q.id === selectedId);
+      if (selPmi && selPmi.category === 'dimension') {
+        const sp = project(lastMVP, selPmi._markerAnchor || selPmi.anchor || [0, 0, 0]); if (sp) dimPts.push(sp);
+        const sg = dimLineScreenSeg(lastMVP, selPmi); if (sg) dimSegs.push(sg);
+      }
+    }
+    const sepShown2 = (DIM_AUTO_MIN_SEP_PX * 0.85) ** 2, sepHidden2 = (DIM_AUTO_MIN_SEP_PX * 1.15) ** 2;
+    const dimTooClose = (c) => {
+      if (c.pmi.category !== 'dimension' || !lastMVP) return false;
+      const sp = project(lastMVP, c.pmi._markerAnchor || c.pmi.anchor || [0, 0, 0]);
+      if (!sp) return true;
+      c._sp = sp;
+      const min2 = c.pmi._occCapPrevShown ? sepShown2 : sepHidden2;
+      for (const k of dimPts) { const dx = k.x - sp.x, dy = k.y - sp.y; if (dx * dx + dy * dy < min2) return true; }
+      c._seg = dimLineScreenSeg(lastMVP, c.pmi);
+      for (const g of dimSegs) if (dimLinesCrowded(g, c._seg) || dimLinesCrowded(c._seg, g)) return true;
+      return false;
+    };
+    const tryChoose = (c) => {
+      if (chosen.has(c) || rejected.has(c)) return false;
+      if (dimTooClose(c)) { rejected.add(c); return false; }
+      if (c._sp) dimPts.push(c._sp);
+      if (c._seg) dimSegs.push(c._seg);
+      chosen.add(c);
+      return true;
+    };
     const chosen = new Set();
+    const rejected = new Set();
     const perCat = {};
     for (const c of cands) {
       if (chosen.size >= slots) break;
       const k = c.pmi.category;
       if ((perCat[k] || 0) >= 3) continue;
-      perCat[k] = (perCat[k] || 0) + 1;
-      chosen.add(c);
+      if (tryChoose(c)) perCat[k] = (perCat[k] || 0) + 1;
     }
-    for (const c of cands) { if (chosen.size >= slots) break; chosen.add(c); }
+    for (const c of cands) { if (chosen.size >= slots) break; tryChoose(c); }
+    for (const c of cands) c.pmi._occCapPrevShown = chosen.has(c);
     for (const c of cands) {
       if (chosen.has(c)) continue;
       c.pmi._markerOccluded = true;
@@ -19595,8 +19629,30 @@ pmi._lineFarPoint = null;
       if (Array.isArray(c.pmi._segVisible)) c.pmi._segVisible = c.pmi._segVisible.map(() => false);
     }
   }
+  // v521: 寸法線どうしが画面上でほぼ重なる(平行で近く、範囲が重なる)かどうか。
+  // 直列・並列に並んだ寸法を同時に出すと、寸法線と寸法値が重なって読めなくなるため。
+  const DIM_LINE_CLEAR_PX = 18;
+  function dimLineScreenSeg(mvp, pmi) {
+    const L = pmi && pmi._dimArrowLinePoints;
+    if (!mvp || !L || L.length !== 2) return null;
+    const a = project(mvp, L[0]), b = project(mvp, L[1]);
+    if (!a || !b) return null;
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    if (len < 1) return null;
+    return { a, b, len, ux: (b.x - a.x) / len, uy: (b.y - a.y) / len };
+  }
+  function dimLinesCrowded(s, t) {
+    if (!s || !t) return false;
+    if (Math.abs(s.ux * t.uy - s.uy * t.ux) > 0.17) return false;     // 平行でない(約10°以上)
+    const d = Math.abs((t.a.x + t.b.x) / 2 * s.uy - (t.a.y + t.b.y) / 2 * s.ux - (s.a.x * s.uy - s.a.y * s.ux));
+    if (d >= DIM_LINE_CLEAR_PX) return false;                          // 十分離れている
+    const p0 = (t.a.x - s.a.x) * s.ux + (t.a.y - s.a.y) * s.uy, p1 = (t.b.x - s.a.x) * s.ux + (t.b.y - s.a.y) * s.uy;
+    const lo = Math.max(0, Math.min(p0, p1)), hi = Math.min(s.len, Math.max(p0, p1));
+    return hi - lo > 6;                                                // 長さ方向にも重なっている
+  }
   function updateDimThinning(mvp) {
-    const active = (dimThinAuto || dimThinRatio < 0.999) && !showAllAtOnce && !(typeof occShowsAllPmi === 'function' && occShowsAllPmi());
+    // v521: サブアセンブリ選択中も、画面上で近すぎる寸法は隠す(重なり防止)
+    const active = (dimThinAuto || dimThinRatio < 0.999) && !showAllAtOnce;
     const cands = [];
     const dirL = rotateVecByQuat({ x: VIEW_DIR[0], y: VIEW_DIR[1], z: VIEW_DIR[2] }, quatConjugate(sceneRotation));
     // 見る方向を約20°刻みの区画に分ける(方位角・仰角)。v433: 境目では前回の区画を保つ
@@ -19627,11 +19683,12 @@ pmi._lineFarPoint = null;
       // 自動: 読みやすい順に見ていき、すでに表示すると決めた寸法値(と選択中の
       // 寸法)に画面上で近すぎるものは隠す。拡大すると間隔が広がるので多く、
       // 縮小すると込み合うので少なく表示される。
-      const kept = [];
+      const kept = [], keptSegs = [];
       const selPmi = selectedId ? pmiList.find((q) => q.id === selectedId) : null;
       if (selPmi && selPmi.category === 'dimension') {
         const sp = project(mvp, selPmi._markerAnchor || selPmi.anchor || [0, 0, 0]);
         if (sp) kept.push(sp);
+        const sg = dimLineScreenSeg(mvp, selPmi); if (sg) keptSegs.push(sg);
       }
       // v433: 間隔がしきい値ちょうど付近のときに出たり消えたりしないよう、
       // 直前に表示していた寸法は少し近くても残し、隠れていた寸法は少し
@@ -19646,8 +19703,10 @@ pmi._lineFarPoint = null;
           const dx = k.x - sp.x, dy = k.y - sp.y;
           if (dx * dx + dy * dy < minSep2) { tooClose = true; break; }
         }
+        const seg = tooClose ? null : dimLineScreenSeg(mvp, c.pmi);
+        if (!tooClose) for (const g of keptSegs) if (dimLinesCrowded(g, seg) || dimLinesCrowded(seg, g)) { tooClose = true; break; }
         if (tooClose) c.pmi._dimThinHidden = true;
-        else kept.push(sp);
+        else { kept.push(sp); if (seg) keptSegs.push(seg); }
       }
       return;
     }
