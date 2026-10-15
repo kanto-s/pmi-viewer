@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v516</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v517</div>
   <!-- v338: 寸法値の位置決めロジック(render()内)が実際に毎フレーム
        計算している値を、画面上でそのまま確認できる簡易デバッグ表示。
        選択中のPMIが寸法のときだけ表示される。開発者ツールを開かなくても
@@ -1310,6 +1310,8 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v517: モデルを動かしている間に、照合番号(バルーン)などの注記が小刻みに震える(微動する)のをなくしました(置き場所がはっきり変わるとき以外は、指している点と一緒になめらかに動きます)
+        <li>v517: モデルを動かしている間に、照合番号(バルーン)などの注記や溶接記号が小刻みに震える(微動する)のを抑えました。置き場所がはっきり変わるとき以外は、指している点と一緒になめらかに動きます。照合番号の置き場所選びも、前のコマの置き場所(指している点から見た位置)を強く優先し、同じ状況なら毎回同じ結果になるようにしました
         <li>v516: モデルの回転を止めた直後に、照合番号(バルーン)などの注記が少しずれる動きをなくしました(止めたときの位置のままにします)
         <li>v515: マウスを近づけて寸法値が拡大表示されても、照合番号(バルーン)などの注記はその寸法を避けて離れていかないようにしました(注記の置き場所は、寸法値の普段の大きさで決めます)
         <li>v514: 注記(照合番号⑤など)が件数制限の境目で出たり消えたりを繰り返さないよう、直前に出ていた注記を残りやすくし、切り替わった直後0.7秒は状態を保つようにしました
@@ -18582,8 +18584,11 @@ pmi._lineFarPoint = null;
             for (const r of sRects) { if (ov(c.rect, r, 6)) u += 50000; if (segTouchesRect(c.K, c.O, r, 3)) u += 50000; }
             for (const [a, b] of sLeaders) { if (segX(c.O, c.K, a, b)) u += 50000; if (segTouchesRect(a, b, c.rect, 3)) u += 50000; }
             u += leaderLenPenalty(Math.hypot(c.K.x - c.O.x, c.K.y - c.O.y)) * 0.5;
-            const prev = w._jointPrevP;
-            if (prev && Math.hypot(prev.x - c.P.x, prev.y - c.P.y) < 10) u -= 300; // 回転中に飛び回らないように
+            // v517: 回転中に飛び回らないように。前のコマの置き場所を「指している点(O)から見た位置」で
+            // 覚えておき、それに近い候補を強く優先する(モデルと一緒に動く分には自然なため、
+            // 画面上の絶対位置ではなく指している点からの相対位置で比べる)。
+            const prevRel = w._jointPrevRel;
+            if (prevRel && Math.hypot(c.P.x - c.O.x - prevRel.x, c.P.y - c.O.y - prevRel.y) < 8) u -= 2500;
             return u;
           };
           const isTop = topBalloons.has(w);
@@ -18639,6 +18644,16 @@ pmi._lineFarPoint = null;
                 extraC.push(c2); found++;
                 if (found >= 3) break;
               }
+            }
+          }
+          // v517: 前のコマとまったく同じ相対位置の候補も入れておく(そのまま使えるなら動かさない)
+          if (w._jointPrevRel) {
+            const cp = evalB({ x: O.x + w._jointPrevRel.x, y: O.y + w._jointPrevRel.y });
+            if (okStatic(cp)) {
+              cp.base = w._ruleSide != null ? w._ruleSide : 0;
+              cp.rule = w._jointPrevRule || 0;
+              cp.u = unary(cp) + cp.rule;
+              extraC.unshift(cp);
             }
           }
           const all = cands.concat(extraC).sort((a, b) => a.u - b.u);
@@ -18698,12 +18713,15 @@ pmi._lineFarPoint = null;
           const solve = () => {
             buildPC();
             const tS = performance.now();
+            // v517: 並べ替えの乱数を毎回同じ列にする(同じ状況なら毎回同じ配置になり、コマごとに揺れない)
+            let seed = 12345;
+            const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x80000000; };
             let bst = improve(items.map(() => 0)), bstV = total(bst);
             const order = [...Array(n).keys()];
             let k2 = 0;
             while (performance.now() - tS < JOINT_TIME_BUDGET_MS && k2 < 60 && n > 1) {
               k2++; tries++;
-              for (let k = n - 1; k > 0; k--) { const r = Math.floor(Math.random() * (k + 1)); const t = order[k]; order[k] = order[r]; order[r] = t; }
+              for (let k = n - 1; k > 0; k--) { const r = Math.floor(rnd() * (k + 1)); const t = order[k]; order[k] = order[r]; order[r] = t; }
               const as = new Array(n).fill(-1);
               for (const i of order) {
                 let bA = 0, bV = Infinity;
@@ -18772,6 +18790,8 @@ pmi._lineFarPoint = null;
             it.w._ruleSide = c.base;
             it.w._crossFixPrev = 'rule';
             it.w._jointPrevP = { x: c.P.x, y: c.P.y };
+            it.w._jointPrevRel = { x: c.P.x - it.O.x, y: c.P.y - it.O.y };
+            it.w._jointPrevRule = c.rule || 0;
             jointDone.add(it.w);
           }
           window.__pmiJointStat = { n, ms: performance.now() - tJ0, score: bestV, tries };
@@ -20567,6 +20587,7 @@ pmi._lineFarPoint = null;
           el.style.opacity = '0';
         } else {
           pmi._screen = s;
+          pmi._anchorScreen = { x: s.x, y: s.y }; // v517: 区画による押し出し前の、指している点の画面位置
           el.style.opacity = pmiFadeAlpha(pmi).toFixed(3);
           // 【上下左右+中央の5区画】「赤枠で四角形になっている箇所は、
           // その四角形の領域専用の区画(5つ目の「中央」)を作り、大きく
@@ -21377,7 +21398,40 @@ pmi._lineFarPoint = null;
           pmi._screen.x = pmi._naturalScreenX + f.dx;
           pmi._screen.y = pmi._naturalScreenY + f.dy;
         }
+      } else {
+        // v517: モデルを動かしている間、注記(照合番号など)の置き場所が毎コマ少しずつ
+        // 変わって小刻みに震える(微動する)のを防ぐ。指している点から見た注記の位置
+        // (ずらし量)が前のコマとほとんど変わらないときは、前のコマのずらし量をそのまま
+        // 使い、注記は指している点と一緒になめらかに動く。はっきり別の置き場所に
+        // 変わったとき(NOTE_JITTER_PX 以上)だけ新しい位置に移す。
+        // ずらし量は、区画による押し出し前の「指している点の画面位置」(_anchorScreen)から測る。
+        // さらに、1コマだけ別の置き場所へ飛んですぐ戻る動きを防ぐため、別の置き場所への移動は
+        // 同じ移動先が2コマ続けて選ばれたときに行う(遅れは1コマだけ)。
+        const NOTE_JITTER_PX = 18;
+        // 利用者が視点を動かしている間だけ行う(ファイルを開いた直後などは、従来どおり落ち着くまで計算し直す)
+        const userMovingView = nowMs - lastUserViewInputAt < 1500;
+        for (const pmi of allScreenPmis) {
+          // 溶接記号も同じように扱う(溶接記号が震えると、そのまわりの注記も巻き込まれて動くため)
+          if ((pmi.category !== 'note' && pmi.category !== 'weld') || pmi.asRecorded || !pmi._anchorScreen) continue;
+          const A = pmi._anchorScreen;
+          const ndx = pmi._screen.x - A.x, ndy = pmi._screen.y - A.y;
+          let keep = false;
+          if (pmi._noteRelDX != null && pmi._noteJitterValid && userMovingView) {
+            if (Math.hypot(ndx - pmi._noteRelDX, ndy - pmi._noteRelDY) < NOTE_JITTER_PX) { keep = true; pmi._notePend = null; }
+            else {
+              const pd = pmi._notePend;
+              if (pd && Math.hypot(ndx - pd.dx, ndy - pd.dy) < NOTE_JITTER_PX) pmi._notePend = null; // 2コマ続いた → 移す
+              else { pmi._notePend = { dx: ndx, dy: ndy }; keep = true; markRenderActive(150); }
+            }
+          }
+          if (keep) {
+            pmi._screen.x = A.x + pmi._noteRelDX;
+            pmi._screen.y = A.y + pmi._noteRelDY;
+          } else { pmi._noteRelDX = ndx; pmi._noteRelDY = ndy; pmi._notePend = null; }
+        }
       }
+      { const shown = new Set(allScreenPmis);
+        for (const pmi of pmiList) pmi._noteJitterValid = shown.has(pmi); }
       for (const pmi of allScreenPmis) {
         pmi._declutterDX = pmi._screen.x - pmi._naturalScreenX;
         pmi._declutterDY = pmi._screen.y - pmi._naturalScreenY;
