@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v536</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v537</div>
   <!-- v338: 寸法値の位置決めロジック(render()内)が実際に毎フレーム
        計算している値を、画面上でそのまま確認できる簡易デバッグ表示。
        選択中のPMIが寸法のときだけ表示される。開発者ツールを開かなくても
@@ -1310,6 +1310,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v537: 表示している溶接記号はすべて、指している継ぎ目の線(エッジ)を溶接記号の色で描くようにしました(選んだ溶接記号はこれまでどおり太く強調)。</li>
         <li>v536: 溶接記号が、ほかの溶接記号・照合番号・寸法値の文字と重ならないように、また指示線や寸法線が溶接記号の上を通らない(溶接記号の指示線もほかの文字の上を通らない)ようにしました(指示線どうしの交差は対象外)。</li>
         <li>v535: サブアセンブリを選んで「周りを薄く」表示しているとき、溶接記号と指示線は、薄くした周りの部品とも空きがあれば重ならない場所に置くようにしました(選んだ部分には重ねない。薄い部品は、近くに空きが無ければ重なってもよい)。</li>
         <li>v534: 溶接記号の指示線・記号がモデルに重ならないようにしました(矢の先に継ぎ目の輪郭近くの点も使い、外側から当てる。確かめた矢の先をそのまま描く。近くに空きが無ければ指示線を長くしてモデルの外に置く。記号がモデルに乗る位置も避ける。矢尻の部分が継ぎ目の縁に触れるのは対象外)。</li>
@@ -20940,6 +20941,39 @@ pmi._lineFarPoint = null;
           drawLines(modelLineData, COLOR_MODEL_EDGE);
         }
         gl.uniform1f(uDepthBiasLoc, 0);
+      }
+      // v537: 表示している溶接記号はすべて、指している継ぎ目の線を溶接記号の色で描く(どの継ぎ目への
+      // 指示かがひと目で分かるように)。選んだ溶接記号(下のv494)より細く、モデルの陰になる部分は描かない。
+      if (gl && pmiList && pmiList.length) {
+        const shownW = pmiList.filter((p) => {
+          if (p.category !== 'weld' || p.id === selectedId || p.asRecorded || !p._modelAttachmentPoint || p._markerOccluded) return false;
+          if (!isCategoryVisible(p)) return false;
+          const el = markerEls.get(p.id);
+          return !!el && el.style.display !== 'none';
+        });
+        if (shownW.length) {
+          gl.uniform1f(uDepthBiasLoc, Math.max(1.5 * sceneScale, 0.5) * 2 / (FAR - NEAR));
+          const px = 2 / Math.max(1, canvas.width), py = 2 / Math.max(1, canvas.height);
+          const dpr = window.devicePixelRatio || 1;
+          for (const w of shownW) {
+            let joint = null;
+            try { joint = weldJointLoop(w); } catch (e) { joint = null; }
+            if (!joint || !joint.segs || !joint.segs.length) continue;
+            if (!w._weldJointLine || w._weldJointLine.src !== joint.segs) {
+              if (w._weldJointLine && w._weldJointLine.buffer) gl.deleteBuffer(w._weldJointLine.buffer);
+              const buf = gl.createBuffer();
+              gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+              gl.bufferData(gl.ARRAY_BUFFER, joint.segs, gl.STATIC_DRAW);
+              w._weldJointLine = { buffer: buf, count: joint.segs.length / 3, src: joint.segs };
+            }
+            for (const [sx, sy] of [[0, 0], [1, 0], [0, 1]]) {
+              gl.uniform2f(uNdcShiftLoc, sx * px * dpr, sy * py * dpr);
+              drawLines(w._weldJointLine, COLOR_WELD);
+            }
+          }
+          gl.uniform2f(uNdcShiftLoc, 0, 0);
+          gl.uniform1f(uDepthBiasLoc, 0);
+        }
       }
       // v494: 選んだ溶接記号が指している継ぎ目の線(パイプとエルボの境目など)を、溶接記号の色で
       // 太めに強調する(モデルの陰になる部分は描かない)。
