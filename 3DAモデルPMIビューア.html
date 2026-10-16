@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v529</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v530</div>
   <!-- v338: 寸法値の位置決めロジック(render()内)が実際に毎フレーム
        計算している値を、画面上でそのまま確認できる簡易デバッグ表示。
        選択中のPMIが寸法のときだけ表示される。開発者ツールを開かなくても
@@ -1310,6 +1310,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v530: 照合番号(バルーン)・溶接記号の置き場所が変わるときの動きを自然にしました。(1) 指している点を中心に、指示線の長さを保ったまま弧を描いて回り込むように動きます(反対側へ移るときに、指している部品の上を素通りしたり、指示線が一度縮んでまた伸びたりしません) (2) 動き出しと止まり際がなめらかなばねの動き(約0.3秒)にし、急に飛び出してからゆっくり尾を引く動きをなくしました。指している点が変わるときも、いまの位置から続けて動きます(寸法値の移動も同じなめらかな動きにしました)
         <li>v529: 溶接記号の指示線が、指している点の手前でモデル(パイプなど)を貫通しないようにしました。横切る置き場所・矢の先は、横切らないものがある限り選びません(照合番号と同じ扱い)
         <li>v528: (あわせて、1コマの描画が重い端末で、表示し始めの注記が薄いまま止まったり、移動の途中で止まって重なったままになる不具合を直しました) 回転を止めたときや小さな揺れを抑えるために前の位置へ残した照合番号・溶接記号が、ほかの番号・記号や指示線、寸法値・寸法線と重なってしまう場合は、前の位置を保たずに重なりを避けた位置へ移すようにしました
         <li>v527: モデルを回転させてPMI(照合番号などの注記・溶接記号・寸法値)の置き場所が変わるとき、パッと飛ばずに約0.2秒でなめらかに移動するようにしました
@@ -20031,7 +20032,7 @@ pmi._lineFarPoint = null;
   let viewportBgRgb = null; // v511
   // v527: PMIの置き場所が変わるとき(回転中の配置のやり直しなど)に、パッと飛ばずに
   // なめらかに移動させる。指している点(または寸法線の中点)から見た位置を、毎コマ
-  // 目標へ少しずつ近づける(時定数 PMI_SMOOTH_TAU_MS、約0.2秒でほぼ到着)。
+  // 目標へ少しずつ近づける(v530からは臨界減衰ばね springStep、約0.3秒でほぼ到着)。
   const PMI_SMOOTH_TAU_MS = 60;
   let pmiSmoothFrame = 0, pmiSmoothDt = 16, pmiSmoothLastT = 0, pmiSmoothMoving = false;
   let pmiSmoothLayoutSeq = 0;
@@ -20041,12 +20042,60 @@ pmi._lineFarPoint = null;
     // 直前まで表示していなかった(または長く更新が無かった)ときは、目標の位置からそのまま始める
     if (!st || (contiguous === false) || (contiguous == null && now - st.t > 300)) { pmi[key] = { x: tx, y: ty, t: now, f: pmiSmoothFrame }; return pmi[key]; }
     if (st.f === pmiSmoothFrame) return st;
-    const dt = Math.min(100, Math.max(1, now - st.t));
-    const k = 1 - Math.exp(-dt / PMI_SMOOTH_TAU_MS);
-    st.x += (tx - st.x) * k; st.y += (ty - st.y) * k;
-    if (Math.hypot(tx - st.x, ty - st.y) < 0.5) { st.x = tx; st.y = ty; } else pmiSmoothMoving = true;
+    const dt = Math.min(100, Math.max(1, now - st.t)) / 1000;
+    // v530: 速度を持つばね(臨界減衰)で近づける。動き出しと止まり際がなめらかになる
+    const rx = springStep(st.x, st.vx || 0, tx, dt), ry = springStep(st.y, st.vy || 0, ty, dt);
+    st.x = rx.x; st.vx = rx.v; st.y = ry.x; st.vy = ry.v;
+    if (Math.hypot(tx - st.x, ty - st.y) < 0.4 && Math.hypot(st.vx, st.vy) < 15) { st.x = tx; st.y = ty; st.vx = 0; st.vy = 0; } else pmiSmoothMoving = true;
     st.t = now; st.f = pmiSmoothFrame;
     return st;
+  }
+  // v530: 臨界減衰ばねの1コマ分(厳密解なので、1コマが重くても行き過ぎ・発散しない)。
+  // PMI_SPRING_W が大きいほど速い(約 5.8/W 秒でほぼ到着。18 → 約0.32秒)
+  const PMI_SPRING_W = 18;
+  function springStep(x, v, target, dt) {
+    const w = PMI_SPRING_W;
+    const d = x - target;
+    const e = Math.exp(-w * dt);
+    const tmp = (v + w * d) * dt;
+    return { x: target + (d + tmp) * e, v: (v - w * tmp) * e };
+  }
+  // v530: 照合番号・溶接記号用。指示線の先 O を中心に「角度」と「距離」でばね移動させる。
+  // 直交座標で直線的に動かすと、O の反対側へ移るときに O(指している部品)の上を素通りし、
+  // 指示線が一度縮んでまた伸びる不自然な動きになるため。
+  // tipKey: 指している点(3D)。点が変わったときは、いまの見た目の位置から新しい点の周りへ引き継ぐ。
+  function smoothAround(pmi, key, O, tx, ty, tipKey, contiguous) {
+    const now = performance.now();
+    const st = pmi[key];
+    const dxT = tx - O.x, dyT = ty - O.y;
+    const rT = Math.hypot(dxT, dyT);
+    const aT = Math.atan2(dyT, dxT);
+    const reset = () => { pmi[key] = { a: aT, r: rT, va: 0, vr: 0, t: now, f: pmiSmoothFrame, tip: tipKey, ax: tx, ay: ty }; return { x: tx, y: ty }; };
+    if (!st || contiguous === false || now - st.t > 300) return reset();
+    if (st.f === pmiSmoothFrame) return { x: O.x + Math.cos(st.a) * st.r, y: O.y + Math.sin(st.a) * st.r };
+    if (st.tip !== tipKey) {
+      // 指している点が変わった: 直前の見た目の位置を、新しい点から見た角度・距離に直して続ける
+      const dx = st.ax - O.x, dy = st.ay - O.y;
+      st.r = Math.hypot(dx, dy); st.a = Math.atan2(dy, dx); st.va = 0; st.vr = 0; st.tip = tipKey;
+    }
+    const dt = Math.min(100, Math.max(1, now - st.t)) / 1000;
+    // 角度は近い回り方向で目標へ(±180°の継ぎ目で一周しないように)
+    let da = aT - st.a;
+    while (da > Math.PI) da -= 2 * Math.PI;
+    while (da < -Math.PI) da += 2 * Math.PI;
+    const aTarget = st.a + da;
+    const ra = springStep(st.a, st.va, aTarget, dt);
+    const rr = springStep(st.r, st.vr, rT, dt);
+    st.a = ra.x; st.va = ra.v; st.r = Math.max(0, rr.x); st.vr = rr.v;
+    // 角度を -π〜π に戻す
+    if (st.a > Math.PI) st.a -= 2 * Math.PI; else if (st.a < -Math.PI) st.a += 2 * Math.PI;
+    let x = O.x + Math.cos(st.a) * st.r, y = O.y + Math.sin(st.a) * st.r;
+    const rem = Math.hypot(tx - x, ty - y);
+    const vel = Math.abs(st.va) * Math.max(st.r, 1) + Math.abs(st.vr);
+    if (rem < 0.4 && vel < 15) { st.a = aT; st.r = rT; st.va = 0; st.vr = 0; x = tx; y = ty; }
+    else pmiSmoothMoving = true;
+    st.ax = x; st.ay = y; st.t = now; st.f = pmiSmoothFrame;
+    return { x, y };
   }
   function render() {
     { const t = performance.now(); pmiSmoothDt = Math.min(50, Math.max(1, t - (pmiSmoothLastT || t - 16))); pmiSmoothLastT = t; pmiSmoothFrame++; pmiSmoothMoving = false; }
@@ -21860,15 +21909,23 @@ pmi._lineFarPoint = null;
         }
       } catch (e) { console.warn('重なりの確認に失敗しました', e); }
       // v527: 注記・溶接記号の置き場所の変化をなめらかに(目標位置へ少しずつ近づける)
+      // v530: 動き方を自然に。(1) 指示線の先(指している点)を中心に、角度と距離に分けて動かす
+      // (反対側へ移るときに指している点の上を素通りせず、指示線の長さを保ったまま弧を描いて回り込む)
+      // (2) 動き出し・止まり際がなめらかなばね(臨界減衰)の動きにする(急発進・ゆっくり尾を引く動きをなくす)
       pmiSmoothLayoutSeq++;
       for (const pmi of allScreenPmis) {
         if ((pmi.category !== 'note' && pmi.category !== 'weld') || pmi.asRecorded || !pmi._anchorScreen) { pmi._tgtDX = null; continue; }
-        const A = pmi._anchorScreen;
         pmi._tgtDX = pmi._screen.x - pmi._naturalScreenX; pmi._tgtDY = pmi._screen.y - pmi._naturalScreenY;
         const contiguous = pmi._smSeq === pmiSmoothLayoutSeq - 1 || pmi._smSeq === pmiSmoothLayoutSeq;
         pmi._smSeq = pmiSmoothLayoutSeq;
-        const d = smoothRel(pmi, '_smPos', pmi._screen.x - A.x, pmi._screen.y - A.y, contiguous);
-        pmi._screen.x = A.x + d.x; pmi._screen.y = A.y + d.y;
+        let O = null;
+        const tipL = leaderModelPoint(pmi);
+        if (tipL) { try { O = project(mvp, tipL); } catch (e) { O = null; } }
+        if (!O) O = pmi._anchorScreen;
+        // 回転の中心は記号(丸)の中心に近い点にする(要素の左端ではなく)
+        const cx = (pmi._tagW || 40) / 2;
+        const p = smoothAround(pmi, '_smPolar', O, pmi._screen.x + cx, pmi._screen.y, tipL, contiguous);
+        pmi._screen.x = p.x - cx; pmi._screen.y = p.y;
       }
       // 移動中は、配置の使い回し(キャッシュ)をせず毎コマ描き直す(指示線も一緒に動かすため)
       if (pmiSmoothMoving) { declutterSettleUntil = Math.max(declutterSettleUntil, performance.now() + 600); markRenderActive(600); } // v528: 重い端末でも止まらないように
