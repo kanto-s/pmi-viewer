@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v537</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v538</div>
   <!-- v338: 寸法値の位置決めロジック(render()内)が実際に毎フレーム
        計算している値を、画面上でそのまま確認できる簡易デバッグ表示。
        選択中のPMIが寸法のときだけ表示される。開発者ツールを開かなくても
@@ -1310,6 +1310,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v538: 溶接記号の矢がモデルの裏側を指さないよう、矢の先の点の面が実際にこちらを向いているかをモデルの面の向き(法線)でも確かめるようにしました。継ぎ目のほとんどが裏側になる向きでは、溶接記号を出しません。</li>
         <li>v537: 表示している溶接記号はすべて、指している継ぎ目の線(エッジ)を溶接記号の色で描くようにしました(選んだ溶接記号はこれまでどおり太く強調)。</li>
         <li>v536: 溶接記号が、ほかの溶接記号・照合番号・寸法値の文字と重ならないように、また指示線や寸法線が溶接記号の上を通らない(溶接記号の指示線もほかの文字の上を通らない)ようにしました(指示線どうしの交差は対象外)。</li>
         <li>v535: サブアセンブリを選んで「周りを薄く」表示しているとき、溶接記号と指示線は、薄くした周りの部品とも空きがあれば重ならない場所に置くようにしました(選んだ部分には重ねない。薄い部品は、近くに空きが無ければ重なってもよい)。</li>
@@ -8780,7 +8781,8 @@
   let occSelected = -1;
   let occPickPath = null;
   // v398: 単体表示・PMIの絞り込み
-  let modelAllTris = null;     // モデル全体の三角形(modelOcclusionTrisは単体表示中は選択部分だけになる)
+  let modelAllTris = null;
+  let modelAllNormals = null;  // v538: modelAllTrisと同じ並びの頂点法線(溶接の矢の先が表を向いているかの判定に使う)     // モデル全体の三角形(modelOcclusionTrisは単体表示中は選択部分だけになる)
   let occView = 'all';         // 'all' = 全体 / 'ghost' = 周りを薄く / 'solo' = 選択部だけ
   // v403: サブアセンブリを選んだとき自動で使う表示方法。最初は「周りを薄く」で、
   // パネルで切り替えると、次に選んだときもその方法を使う。
@@ -8969,6 +8971,7 @@
     modelFaceData = null;
     modelOcclusionTris = null;
     modelAllTris = null;
+    modelAllNormals = null;
     if (gl && modelData.flatTriangles && modelData.flatTriangles.length) {
       const positions = new Float32Array(modelData.flatTriangles);
       // v135: モデル本体との遮蔽判定(rayHitsAnyTriangle)用に、ローカル
@@ -8998,6 +9001,7 @@
           for (let v = 0; v < 3; v++) { normals[o+v*3]=nx; normals[o+v*3+1]=ny; normals[o+v*3+2]=nz; }
         }
       }
+      modelAllNormals = normals; // v538
       const posBuf = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
       gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
@@ -16357,6 +16361,32 @@
   // 点も「縁の点(edge)」として矢の先の候補に加える。60°以内の点で横切らずに指せるときはそちらを優先し、
   // 縁の点は横切らずに指せる点が他に無いときに使う(WELD_TIP_EDGE_COST)。
   const WELD_TIP_EDGE_COS = 0.0;   // cos(90°): 輪郭まで(裏側は含めない)
+  // v538: 継ぎ目の輪(中心と面)から求めた向きだけでは、ティーの股の部分のように輪が平らでない継ぎ目で
+  // 裏側の点を表と見誤り、モデルの裏側を指すことがあった。モデルの面そのものの向き(頂点法線)でも確かめる。
+  //   ・矢の先にできるのは、その点の面がカメラの方を WELD_TIP_REAL_COS(約75°)以内で向いている点だけ
+  //   ・その点の面が60°以内で向いている点が WELD_MIN_FRONT_PTS 個より少ない(継ぎ目のほとんどが裏側)
+  //     ときは、溶接記号を出さない
+  const WELD_TIP_REAL_COS = 0.26;
+  const WELD_MIN_FRONT_PTS = 3;
+  // 点pのまわりの面がカメラの方を向いている度合い(cos)。継ぎ目は2つの面の境目なので、継ぎ目の
+  // 両側(継ぎ目の面の法線の+側・-側)に少しずらした点で一番近い面を調べ、向いている方を使う。
+  function weldSurfaceFacing(joint, p, cover) {
+    if (!modelAllTris || !modelAllNormals) return null;
+    const n = joint && joint.normal, d = joint ? Math.max(0.3, joint.radius * 0.06) : 0.5;
+    const pts = n ? [[p[0] + n[0] * d, p[1] + n[1] * d, p[2] + n[2] * d], [p[0] - n[0] * d, p[1] - n[1] * d, p[2] - n[2] * d]] : [p];
+    let best = null;
+    for (const q of pts) {
+      const nt = nearestTriangle(modelAllTris, q);
+      if (!nt) continue;
+      const o = nt.t * 9, N = modelAllNormals;
+      let nx = N[o] + N[o + 3] + N[o + 6], ny = N[o + 1] + N[o + 4] + N[o + 7], nz = N[o + 2] + N[o + 5] + N[o + 8];
+      const L = Math.hypot(nx, ny, nz);
+      if (!(L > 1e-9)) continue;
+      const f = (nx * cover.vx + ny * cover.vy + nz * cover.vz) / L;
+      if (best == null || f > best) best = f;
+    }
+    return best;
+  }
   const WELD_TIP_EDGE_COST = 0.5;
   function weldOutwardDir(joint, p) {
     if (!joint || !joint.center || !joint.normal) return null;
@@ -16390,8 +16420,10 @@
     if (pmi._weldCandKey === cover.key && pmi._weldCands) return pmi._weldCands;
     const joint = weldJointLoop(pmi);
     const list = [];
-    const faceOk = (p) => { const f = weldTipFacing(joint, p, cover); return f == null || f >= WELD_TIP_FACING_COS; };
-    const edgeOk = (p) => { const f = weldTipFacing(joint, p, cover); return f != null && f >= WELD_TIP_EDGE_COS && f < WELD_TIP_FACING_COS; }; // v534
+    // v538: 面の向き(weldSurfaceFacing)も満たす点だけを使う
+    const realF = (p) => { try { return weldSurfaceFacing(joint, p, cover); } catch (e) { return null; } };
+    const faceOk = (p) => { const f = weldTipFacing(joint, p, cover); if (!(f == null || f >= WELD_TIP_FACING_COS)) return false; const r = realF(p); return r == null || r >= WELD_TIP_FACING_COS; };
+    const edgeOk = (p) => { const f = weldTipFacing(joint, p, cover); if (!(f != null && f >= WELD_TIP_EDGE_COS)) return false; const r = realF(p); return r == null || r >= WELD_TIP_REAL_COS; }; // v534
     const mk = (p, sp, isOrig, vis, edge) => ({ p, sp, isOrig, vis, edge: !!edge, out: vis ? weldTipScreenOut(joint, p, sp, mvp) : null });
     const os = project(mvp, orig);
     if (os) list.push(mk(orig, os, true, cover.visible(orig) && faceOk(orig)));
@@ -16444,6 +16476,7 @@
     const check = cands.filter((c) => c.vis);
     if (!check.length) return null; // 見えている(裏側でない)点が無い → 溶接記号は出さない
     if (!check.some((c) => !c.edge)) return null; // v534: 60°以内の点が1つも見えない向き(継ぎ目が見えない)では、これまでどおり出さない
+    if (check.filter((c) => !c.edge && !c.isOrig).length < WELD_MIN_FRONT_PTS && !(origC && origC.vis)) return null; // v538
     let best = null, bestCost = Infinity, bestFrac = 1, bestAng = 0;
     for (const c of check) {
       const f = cover.segFrac(S, c.sp, SKIP);
@@ -20615,7 +20648,8 @@ pmi._lineFarPoint = null;
             if (!joint || !joint.pts.length) continue;
             const cands = weldTipCandidates(pmi, mvpNow);
             // v534: 縁の点(edge)だけが見えている向きは「継ぎ目が見えない」として、これまでどおり出さない
-            if (cands && cands.length && !cands.some((c) => c.vis && !c.edge)) { pmi._markerOccluded = true; pmi._farOccluded = true; }
+            // v538: 表を向いている見える点が少ない(継ぎ目のほとんどが裏側)ときも出さない
+            if (cands && cands.length && cands.filter((c) => c.vis && !c.edge && !c.isOrig).length < WELD_MIN_FRONT_PTS && !(cands[0] && cands[0].isOrig && cands[0].vis)) { pmi._markerOccluded = true; pmi._farOccluded = true; }
           }
         } catch (e) { console.warn('溶接の継ぎ目の見え方の判定に失敗しました', e); }
 
