@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v533</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v534</div>
   <!-- v338: 寸法値の位置決めロジック(render()内)が実際に毎フレーム
        計算している値を、画面上でそのまま確認できる簡易デバッグ表示。
        選択中のPMIが寸法のときだけ表示される。開発者ツールを開かなくても
@@ -1310,6 +1310,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v534: 溶接記号の指示線・記号がモデルに重ならないようにしました(矢の先に継ぎ目の輪郭近くの点も使い、外側から当てる。確かめた矢の先をそのまま描く。近くに空きが無ければ指示線を長くしてモデルの外に置く。記号がモデルに乗る位置も避ける。矢尻の部分が継ぎ目の縁に触れるのは対象外)。</li>
         <li>v533: 溶接記号の指示線がモデルの上を通らないよう、描く直前の最終的な位置でもう一度細かく確かめるようにしました(画面の端・パネルからの押し戻しや、前の位置を保つ処理のあとに横切っていれば、横切らない置き場所へ移します。細い管も見落とさないよう約2pxおきに調べます)。</li>
         <li>v532: 回転を止めて照合番号(バルーン)・溶接記号の置き場所が変わるとき、指している点の周りを弧を描いて回り込む動きをやめ、止めた瞬間に新しい位置へパッと切り替えるようにしました(回転中は引き続き置き場所を変えません)
         <li>v531: モデルを回転している間は、照合番号(バルーン)・溶接記号の置き場所を変えないようにしました(指している点から見た指示線の長さ・向きは回転を始めたときのまま、モデルと一緒に動くだけ)。回転を止めた瞬間(指・マウスを離したとき、または動きが0.18秒止まったとき)に置き場所を計算し直し、指している点を中心に弧を描くように新しい位置へ移します
@@ -16200,6 +16201,13 @@
   const SCREEN_COVER_CELL_PX = 5;
   const WELD_FINE_CELL_PX = 2;   // v531(案4): 最終確認用の細かい升目
   const WELD_FINE_STEP_PX = 2;   // v531(案4): 最終確認で指示線の上を調べる間隔
+  const WELD_FINAL_TOL_PX = 3;   // v534: これ以下のかすり(隣の部品の縁をかすめる程度)は横切りとみなさない
+  // v534: 矢の先の手前で調べない長さ(px)。矢尻(長さ 10px×溶接記号の大きさ)は継ぎ目に触れるものなので、
+  // 矢尻の部分がフランジやティーの縁にかかるのは「横切り」に数えない(描画の矢尻の長さと合わせる)
+  function weldTipSkipPx() {
+    const k2 = Math.max(0.7, Math.min(2.5, weldNotationScale()));
+    return Math.max(7, 10 * k2 + 4);
+  }
   let screenCoverState = null;
   function getScreenCover(mvp) {
     if (!modelOcclusionTris || !modelOcclusionTris.length || !mvp) return null;
@@ -16304,6 +16312,20 @@
         }
         return hit / N;
       },
+      // v534: 線分 a→b がモデルの上を通る長さ(px)。モデルの上を通る長さが WELD_FINAL_TOL_PX 以下
+      // (矢の先の近くで隣の部品の縁をかすめる程度)なら、横切っていないとみなすために使う
+      segHitPxFine(a, b, skipEndPx) {
+        const dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy);
+        const usable = L - (skipEndPx || 0);
+        if (usable < 4) return 0;
+        const N = Math.max(4, Math.min(240, Math.ceil(usable / WELD_FINE_STEP_PX)));
+        let hit = 0;
+        for (let i = 0; i < N; i++) {
+          const t = (usable * (i + 0.5) / N) / L;
+          if (this.atFine(a.x + dx * t, a.y + dy * t)) hit++;
+        }
+        return hit * usable / N;
+      },
       // 3Dの点がカメラから見えているか(カメラへ向かう光線が他の面に当たらないか)
       visible(p) {
         const NUDGE = 0.5;
@@ -16325,6 +16347,12 @@
   //  F. 矢の側(JIS Z 3021)を変えないため、継ぎ目の線そのものが見えないときに相手の部品の端を指す
   //     代わりの方法(v495)は使わず、その向きでは溶接記号を出さない。
   const WELD_TIP_FACING_COS = 0.5; // cos(60°)
+  // v534: 60°以内の点だけだと、拡大したときに矢の先が管の見た目の内側に入り、どこから矢を当てても
+  // 管(溶接される部品)の上を指示線が通ってしまっていた。裏側は指さないまま、60°〜90°(輪郭の近く)の
+  // 点も「縁の点(edge)」として矢の先の候補に加える。60°以内の点で横切らずに指せるときはそちらを優先し、
+  // 縁の点は横切らずに指せる点が他に無いときに使う(WELD_TIP_EDGE_COST)。
+  const WELD_TIP_EDGE_COS = 0.0;   // cos(90°): 輪郭まで(裏側は含めない)
+  const WELD_TIP_EDGE_COST = 0.5;
   function weldOutwardDir(joint, p) {
     if (!joint || !joint.center || !joint.normal) return null;
     const c = joint.center, n = joint.normal;
@@ -16358,14 +16386,17 @@
     const joint = weldJointLoop(pmi);
     const list = [];
     const faceOk = (p) => { const f = weldTipFacing(joint, p, cover); return f == null || f >= WELD_TIP_FACING_COS; };
-    const mk = (p, sp, isOrig, vis) => ({ p, sp, isOrig, vis, out: vis ? weldTipScreenOut(joint, p, sp, mvp) : null });
+    const edgeOk = (p) => { const f = weldTipFacing(joint, p, cover); return f != null && f >= WELD_TIP_EDGE_COS && f < WELD_TIP_FACING_COS; }; // v534
+    const mk = (p, sp, isOrig, vis, edge) => ({ p, sp, isOrig, vis, edge: !!edge, out: vis ? weldTipScreenOut(joint, p, sp, mvp) : null });
     const os = project(mvp, orig);
     if (os) list.push(mk(orig, os, true, cover.visible(orig) && faceOk(orig)));
     if (joint) {
       for (const p of joint.pts) {
-        if (!faceOk(p) || !cover.visible(p)) continue;
+        const edge = !faceOk(p);
+        if (edge && !edgeOk(p)) continue; // 裏側の点は使わない
+        if (!cover.visible(p)) continue;
         const sp = project(mvp, p);
-        if (sp) list.push(mk(p, sp, false, true));
+        if (sp) list.push(mk(p, sp, false, true, edge));
       }
     }
     pmi._weldCands = list;
@@ -16407,12 +16438,13 @@
     const orig = pmi._modelAttachmentPoint;
     const check = cands.filter((c) => c.vis);
     if (!check.length) return null; // 見えている(裏側でない)点が無い → 溶接記号は出さない
+    if (!check.some((c) => !c.edge)) return null; // v534: 60°以内の点が1つも見えない向き(継ぎ目が見えない)では、これまでどおり出さない
     let best = null, bestCost = Infinity, bestFrac = 1, bestAng = 0;
     for (const c of check) {
       const f = cover.segFrac(S, c.sp, SKIP);
       const ang = weldApproachBad(c, S);
       const d3 = Math.hypot(c.p[0] - orig[0], c.p[1] - orig[1], c.p[2] - orig[2]) / (2 * R);
-      let cost = (f > 0 ? 10 + f * 20 : 0) + ang * 1.6 + d3 * 0.6; // v529: モデルを横切る点は、横切らない点がある限り選ばない
+      let cost = (f > 0 ? 10 + f * 20 : 0) + ang * 1.6 + d3 * 0.6 + (c.edge ? WELD_TIP_EDGE_COST : 0); // v529: モデルを横切る点は、横切らない点がある限り選ばない / v534: 縁の点は少し不利
       // 回転中に矢の先が継ぎ目の上をあちこち移らないよう、前のコマの点に近いものを有利にする
       if (prevLocal && Math.hypot(c.p[0] - prevLocal[0], c.p[1] - prevLocal[1], c.p[2] - prevLocal[2]) < R * 0.25) cost -= 0.35;
       if (cost < bestCost) { bestCost = cost; best = c; bestFrac = f; bestAng = ang; }
@@ -16424,6 +16456,13 @@
   // 返り値: { local: [x,y,z], screen: {x,y} } (選び直さないときは元の点)
   function chooseWeldTip(pmi, mvp, kneeX, kneeY) {
     if (!pmi._modelAttachmentPoint) return null;
+    // v534: このコマの最終確認(weldFinalLeaderCheck)で、モデルを横切らないことを確かめた矢の先があれば、それを使う
+    // (描くときに別の点を選び直すと、確かめた指示線と描いた指示線が食い違い、モデルの上を通ることがあった)
+    const fz = pmi._weldTipForce;
+    if (fz && fz.seq === weldFinalSeq && fz.local) {
+      const sc = project(mvp, fz.local);
+      if (sc) { pmi._weldTipLocal = fz.local; pmi._weldTipAng = fz.ang || 0; pmi._weldTipCacheKey = null; return { local: fz.local, screen: sc, ang: fz.ang || 0 }; }
+    }
     const cover = getScreenCover(mvp);
     if (!cover) return null;
     const ck = cover.key + '|' + Math.round(kneeX / 4) + ',' + Math.round(kneeY / 4);
@@ -19286,7 +19325,8 @@ pmi._lineFarPoint = null;
     const tip = bestWeldTipFrom(w, mvp, k1.K, w._weldTipLocal);
     if (!tip) return null;
     const k2 = weldKneeFor(P, rect, tip.screen, ko);
-    let frac = cover.segFracFine(k2.K, tip.screen, 7);
+    const crossFrac = (a, b) => { const h = cover.segHitPxFine(a, b, weldTipSkipPx()); return h > WELD_FINAL_TOL_PX ? h / (Math.hypot(b.x - a.x, b.y - a.y) || 1) : 0; };
+    let frac = crossFrac(k2.K, tip.screen);
     // 矢の先が記号の中心に近いときは、反対の端から出た場合も調べ、悪い方で評価する(evalAtと同じ)
     if (frac === 0 && Math.abs(tip.screen.x - P.x) < 24) {
       const mirrorO = { x: tip.screen.x < P.x ? P.x + 1 : P.x - 1, y: tip.screen.y };
@@ -19294,9 +19334,27 @@ pmi._lineFarPoint = null;
       const K3 = { x: k3.K.x, y: P.y + ko.dy };
       const adx = Math.abs(tip.screen.x - K3.x), dyN = tip.screen.y - K3.y;
       K3.y += Math.min(80, Math.max(0, adx * 0.36 - Math.abs(dyN))) * (dyN >= 0 ? -1 : 1);
-      frac = Math.max(frac, cover.segFracFine(K3, tip.screen, 7));
+      frac = Math.max(frac, crossFrac(K3, tip.screen));
     }
     return { frac, K: k2.K, tip, rect: { x0: rect.x0, x1: rect.x1, y0: rect.y0 + k2.dy, y1: rect.y1 + k2.dy } };
+  }
+  // v534: 矢の先を決めたうえで(tipC: weldTipCandidatesの1つ)、記号の中心Pに置いたときの評価
+  function weldFinalEvalFixed(w, P, g, cover, tipC, mvp) {
+    const ko = weldKneeOffset(w);
+    const rect = { x0: P.x - g.w / 2, x1: P.x + g.w / 2, y0: P.y - g.h / 2, y1: P.y + g.h / 2 };
+    const k2 = weldKneeFor(P, rect, tipC.sp, ko);
+    const crossFrac = (a, b) => { const h = cover.segHitPxFine(a, b, weldTipSkipPx()); return h > WELD_FINAL_TOL_PX ? h / (Math.hypot(b.x - a.x, b.y - a.y) || 1) : 0; };
+    let frac = crossFrac(k2.K, tipC.sp);
+    if (frac === 0 && Math.abs(tipC.sp.x - P.x) < 24) {
+      const mirrorO = { x: tipC.sp.x < P.x ? P.x + 1 : P.x - 1, y: tipC.sp.y };
+      const k3 = weldKneeFor(P, rect, mirrorO, ko);
+      const K3 = { x: k3.K.x, y: P.y + ko.dy };
+      const adx = Math.abs(tipC.sp.x - K3.x), dyN = tipC.sp.y - K3.y;
+      K3.y += Math.min(80, Math.max(0, adx * 0.36 - Math.abs(dyN))) * (dyN >= 0 ? -1 : 1);
+      frac = Math.max(frac, crossFrac(K3, tipC.sp));
+    }
+    const ang = weldApproachBad(tipC, k2.K);
+    return { frac, K: k2.K, tip: { local: tipC.p, screen: tipC.sp, ang }, rect: { x0: rect.x0, x1: rect.x1, y0: rect.y0 + k2.dy, y1: rect.y1 + k2.dy } };
   }
   // 溶接記号を_screen(マーカー基準点)sに置いたとき、指示線がモデルを横切るか(細かい判定)。
   // 判定できないときはnull
@@ -19307,12 +19365,17 @@ pmi._lineFarPoint = null;
     const ev = weldFinalEval(w, { x: s.x + g.offX, y: s.y + g.offY }, g, mvp, cover);
     return ev ? ev.frac > 0 : null;
   }
-  const WELD_FINAL_BUDGET_MS = 8; // 1コマあたりの最終確認の置き直し探しの時間の上限
+  const WELD_FINAL_BUDGET_MS = 12; // 1コマあたりの最終確認の置き直し探しの時間の上限
+  let weldFinalSeq = 0; // v534: 最終確認の回数(矢の先をそのコマの描画に引き継ぐため)
+  // v534: 近く(指示線 LEADER_HARD_PX 以内)に横切らない置き場所が無いときは、指示線を長くしてでも
+  // モデルの外へ出す(拡大していると、近くは全部モデルの上になるため)。指示線の長さの上限。
+  const WELD_FINAL_FAR_LEADER_PX = 360;
   function weldFinalLeaderCheck(allScreenPmis, mvp) {
     const cover = getScreenCover(mvp);
     if (!cover) return;
     const welds = allScreenPmis.filter((p) => p.category === 'weld' && !p.asRecorded && p._screen &&
       p._modelAttachmentPoint && !p._noModelLeader);
+    weldFinalSeq++;
     if (!welds.length) return;
     const t0 = performance.now();
     const cw = cvSize().w, ch = cvSize().h;
@@ -19324,21 +19387,31 @@ pmi._lineFarPoint = null;
     { const el = document.getElementById('occPanel');
       if (el && !el.hidden) { const r = el.getBoundingClientRect(); banned.push({ x0: r.left - cr.left, y0: r.top - cr.top, x1: r.right - cr.left + 8, y1: r.bottom - cr.top + 8 }); } }
     const ov = (a, b, m) => a.x0 - m < b.x1 && b.x0 - m < a.x1 && a.y0 - m < b.y1 && b.y0 - m < a.y1;
-    // 記号の枠の中にモデルがどれだけあるか(5×3点)
+    // 記号の枠の中にモデルがどれだけあるか(7×4点、v534: 細かい升目で)
     const rectOnModel = (r) => {
       let h = 0;
-      for (let i = 0; i < 5; i++) for (let j = 0; j < 3; j++) if (cover.at(r.x0 + (r.x1 - r.x0) * (i + 0.5) / 5, r.y0 + (r.y1 - r.y0) * (j + 0.5) / 3)) h++;
-      return h / 15;
+      for (let i = 0; i < 7; i++) for (let j = 0; j < 4; j++) if (cover.atFine(r.x0 + (r.x1 - r.x0) * (i + 0.5) / 7, r.y0 + (r.y1 - r.y0) * (j + 0.5) / 4)) h++;
+      return h / 28;
     };
     const geo = new Map();
     const geoOf = (p) => { let g = geo.get(p); if (!g) { g = measureTagCenterOffset(p); geo.set(p, g); } return g; };
-    for (const w of welds) {
+    // v534: 時間切れで後回しになった記号が次のコマで先に調べられるよう、調べ始める順番を毎回ずらす
+    const order = welds.slice(weldFinalSeq % welds.length).concat(welds.slice(0, weldFinalSeq % welds.length));
+    for (const w of order) {
       const g = geoOf(w);
       if (!g || !(g.w > 0)) continue;
       const P0 = { x: w._screen.x + g.offX, y: w._screen.y + g.offY };
       const cur = weldFinalEval(w, P0, g, mvp, cover);
-      if (!cur || cur.frac === 0) { if (cur) w._finalFixKey = null; continue; }
-      if (performance.now() - t0 > WELD_FINAL_BUDGET_MS) break;
+      // v534: 指示線がモデルを横切っているときに加えて、記号そのものがモデルの上に乗っているときも置き直す
+      // v534: 描くときに同じ矢の先を使う(今の位置のままでよい場合も、置き直す場合も)
+      const forceTip = (ev) => { w._weldTipForce = ev && ev.tip && ev.tip.local ? { local: ev.tip.local, ang: ev.tip.ang || 0, seq: weldFinalSeq } : null; };
+      forceTip(cur);
+      if (!cur || (cur.frac === 0 && rectOnModel(cur.rect) === 0)) { if (cur) w._finalFixKey = null; continue; }
+      if (performance.now() - t0 > WELD_FINAL_BUDGET_MS) {
+        // 時間切れ: 残りは次のコマで調べる(画面が止まっていても、もう1コマ描くようにする)
+        declutterSettleUntil = Math.max(declutterSettleUntil, performance.now() + 300); markRenderActive(300);
+        break;
+      }
       // ほかの番号・記号・寸法値の枠(この記号を置き直すときに重ならないようにする)
       const otherRects = [];
       for (const q of allScreenPmis) {
@@ -19361,19 +19434,20 @@ pmi._lineFarPoint = null;
         return true;
       };
       let best = null;
-      const consider = (P, key, bonus) => {
-        const ev = weldFinalEval(w, P, g, mvp, cover);
+      let lenLimit = LEADER_HARD_PX;
+      const consider = (P, key, bonus, evGiven) => {
+        const ev = evGiven || weldFinalEval(w, P, g, mvp, cover);
         if (!ev || ev.frac > 0 || !placeOk(ev)) return;
         const len = Math.hypot(ev.K.x - ev.tip.screen.x, ev.K.y - ev.tip.screen.y);
-        if (len > LEADER_HARD_PX) return;
+        if (len > lenLimit) return;
         let c = Math.hypot(P.x - P0.x, P.y - P0.y) * 0.5 + leaderLenPenalty(len) + (bonus || 0);
-        const ang = weldApproachBadAt(w, ev.tip, ev.K);
+        const ang = evGiven ? (ev.tip.ang || 0) : weldApproachBadAt(w, ev.tip, ev.K);
         c += ang * 2000 + (ang > WELD_APPROACH_OK ? 1500 : 0);
         const om = rectOnModel(ev.rect);
-        c += om * 6000 + (om > 0 ? 1500 : 0);
+        c += om * 6000 + (om > 0 ? 20000 : 0); // v534: 記号がモデルに乗るのも、指示線が横切るのと同じく避ける
         for (const r of otherRects) if (ov(ev.rect, r, 6)) { c += 20000; break; }
         if (w._finalFixKey === key) c -= 600; // 前のコマと同じ候補を有利に(回転中に飛び回らないように)
-        if (!best || c < best.c) best = { P, c, key };
+        if (!best || c < best.c) best = { P, c, key, ev };
       };
       // 1) 置き場所探しの結果(押し戻し・微動防止の前の位置)
       if (w._rawLayoutPos) consider({ x: w._rawLayoutPos.x + g.offX, y: w._rawLayoutPos.y + g.offY }, 'raw', 0);
@@ -19382,17 +19456,53 @@ pmi._lineFarPoint = null;
       const O0 = oL ? project(mvp, oL) : null;
       if (O0) {
         const L0 = 60;
-        for (let k = 0; k < 24; k++) {
-          const a = k * Math.PI / 12, dx = Math.cos(a), dy = Math.sin(a);
-          for (const mul of [0.4, 0.7, 1.05, 1.5, 2.0]) {
-            const dist = L0 * mul + Math.abs(dx) * g.w / 2 + Math.abs(dy) * g.h / 2;
-            consider({ x: O0.x + dx * dist, y: O0.y + dy * dist }, k + '|' + mul, 0);
+        const ring = (muls) => {
+          for (let k = 0; k < 24; k++) {
+            const a = k * Math.PI / 12, dx = Math.cos(a), dy = Math.sin(a);
+            for (const mul of muls) {
+              const dist = L0 * mul + Math.abs(dx) * g.w / 2 + Math.abs(dy) * g.h / 2;
+              consider({ x: O0.x + dx * dist, y: O0.y + dy * dist }, k + '|' + mul, 0);
+            }
+            if (performance.now() - t0 > WELD_FINAL_BUDGET_MS * 3) break;
           }
-          if (performance.now() - t0 > WELD_FINAL_BUDGET_MS * 2) break;
+        };
+        ring([0.4, 0.7, 1.05, 1.5, 2.0]);
+        // v534: 近くに無ければ、遠く(指示線 WELD_FINAL_FAR_LEADER_PX まで)から探す。長いほど不利(leaderLenPenalty)
+        const farOk = (b) => b && b.c < 15000; // ほかの記号と重なる候補しか無いときも遠くを探す
+        if (!farOk(best)) { lenLimit = WELD_FINAL_FAR_LEADER_PX; ring([2.6, 3.3, 4.1, 5.0, 6.0]); }
+      }
+      // v534: 矢の先から探す。見えている継ぎ目の点ごとに、その点の外向き(継ぎ目の外側)へ指示線を伸ばし、
+      // その先に記号を置く。上の探し方(記号の置き場所を先に決め、そこから矢の先を選ぶ)では、拡大していると
+      // どの置き場所からも横切らない矢の先が選ばれず、置き場所が見つからないことがあった。
+      if (!best || best.c >= 15000) {
+        lenLimit = WELD_FINAL_FAR_LEADER_PX;
+        const tc = (weldTipCandidates(w, mvp) || []).filter((c) => c.vis && c.sp);
+        // 元の点に近い順(同じ継ぎ目の上で、CADの指示に近い点を優先)に、間引いて最大12点
+        const orig = w._modelAttachmentPoint;
+        tc.sort((a, b) => (Math.hypot(a.p[0] - orig[0], a.p[1] - orig[1], a.p[2] - orig[2]) + (a.edge ? 1e-3 : 0)) -
+                          (Math.hypot(b.p[0] - orig[0], b.p[1] - orig[1], b.p[2] - orig[2]) + (b.edge ? 1e-3 : 0)));
+        const stepT = Math.max(1, Math.ceil(tc.length / 12));
+        const ko = weldKneeOffset(w);
+        outer: for (let i = 0; i < tc.length; i += stepT) {
+          const c = tc[i];
+          let ox, oy;
+          if (c.out) { ox = c.out.x; oy = c.out.y; } else { const dx = P0.x - c.sp.x, dy = P0.y - c.sp.y, L = Math.hypot(dx, dy) || 1; ox = dx / L; oy = dy / L; }
+          const a0 = Math.atan2(oy, ox);
+          for (const da of [0, 25, -25, 50, -50]) {
+            const a = a0 + da * Math.PI / 180, ux = Math.cos(a), uy = Math.sin(a);
+            for (const dist of [45, 80, 130, 200, 300]) {
+              const Kt = { x: c.sp.x + ux * dist, y: c.sp.y + uy * dist };
+              // 折れ点は記号の、矢の先に近い側の端にある(weldKneeFor)ので、その位置から記号の中心を逆算する
+              const P = { x: ux >= 0 ? Kt.x + g.w / 2 - ko.dx : Kt.x - g.w / 2 + ko.dx, y: Kt.y - ko.dy };
+              consider(P, 't' + i + '|' + da + '|' + dist, (c.edge ? 300 : 0), weldFinalEvalFixed(w, P, g, cover, c, mvp));
+            }
+            if (performance.now() - t0 > WELD_FINAL_BUDGET_MS * 3) break outer;
+          }
         }
       }
       if (!best) { w._finalFixKey = null; continue; } // 横切らない候補が無い → 今の位置のまま
       w._finalFixKey = best.key;
+      forceTip(best.ev);
       w._screen.x = best.P.x - g.offX;
       w._screen.y = best.P.y - g.offY;
       w._finalFixed = true;
@@ -20458,7 +20568,8 @@ pmi._lineFarPoint = null;
             const joint = weldJointLoop(pmi);
             if (!joint || !joint.pts.length) continue;
             const cands = weldTipCandidates(pmi, mvpNow);
-            if (cands && cands.length && !cands.some((c) => c.vis)) { pmi._markerOccluded = true; pmi._farOccluded = true; }
+            // v534: 縁の点(edge)だけが見えている向きは「継ぎ目が見えない」として、これまでどおり出さない
+            if (cands && cands.length && !cands.some((c) => c.vis && !c.edge)) { pmi._markerOccluded = true; pmi._farOccluded = true; }
           }
         } catch (e) { console.warn('溶接の継ぎ目の見え方の判定に失敗しました', e); }
 
