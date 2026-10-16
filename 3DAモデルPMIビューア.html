@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v532</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v533</div>
   <!-- v338: 寸法値の位置決めロジック(render()内)が実際に毎フレーム
        計算している値を、画面上でそのまま確認できる簡易デバッグ表示。
        選択中のPMIが寸法のときだけ表示される。開発者ツールを開かなくても
@@ -1310,6 +1310,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v533: 溶接記号の指示線がモデルの上を通らないよう、描く直前の最終的な位置でもう一度細かく確かめるようにしました(画面の端・パネルからの押し戻しや、前の位置を保つ処理のあとに横切っていれば、横切らない置き場所へ移します。細い管も見落とさないよう約2pxおきに調べます)。</li>
         <li>v532: 回転を止めて照合番号(バルーン)・溶接記号の置き場所が変わるとき、指している点の周りを弧を描いて回り込む動きをやめ、止めた瞬間に新しい位置へパッと切り替えるようにしました(回転中は引き続き置き場所を変えません)
         <li>v531: モデルを回転している間は、照合番号(バルーン)・溶接記号の置き場所を変えないようにしました(指している点から見た指示線の長さ・向きは回転を始めたときのまま、モデルと一緒に動くだけ)。回転を止めた瞬間(指・マウスを離したとき、または動きが0.18秒止まったとき)に置き場所を計算し直し、指している点を中心に弧を描くように新しい位置へ移します
         <li>v530: 照合番号(バルーン)・溶接記号の置き場所が変わるときの動きを自然にしました。(1) 指している点を中心に、指示線の長さを保ったまま弧を描いて回り込むように動きます(反対側へ移るときに、指している部品の上を素通りしたり、指示線が一度縮んでまた伸びたりしません) (2) 動き出しと止まり際がなめらかなばねの動き(約0.3秒)にし、急に飛び出してからゆっくり尾を引く動きをなくしました。指している点が変わるときも、いまの位置から続けて動きます(寸法値の移動も同じなめらかな動きにしました)
@@ -16197,6 +16198,8 @@
   // 正投影なので、画面の点を通る光線の向きはどこでも同じ。カメラの状態が変わらない限り、
   // 升目(SCREEN_COVER_CELL_PX)ごとの結果を覚えておき、同じ升目は調べ直さない。
   const SCREEN_COVER_CELL_PX = 5;
+  const WELD_FINE_CELL_PX = 2;   // v531(案4): 最終確認用の細かい升目
+  const WELD_FINE_STEP_PX = 2;   // v531(案4): 最終確認で指示線の上を調べる間隔
   let screenCoverState = null;
   function getScreenCover(mvp) {
     if (!modelOcclusionTris || !modelOcclusionTris.length || !mvp) return null;
@@ -16224,6 +16227,7 @@
     vx /= depthLen; vy /= depthLen; vz /= depthLen;
     const tris = modelOcclusionTris;
     const cells = new Map();
+    const cellsFine = new Map(); // v531
     const groups = new Map();
     const st = {
       key, tris, cw, ch, vx, vy, vz, depthLen,
@@ -16269,6 +16273,34 @@
         for (let i = 0; i < N; i++) {
           const t = (usable * (i + 0.5) / N) / L;
           if (this.at(a.x + dx * t, a.y + dy * t)) hit++;
+        }
+        return hit / N;
+      },
+      // v531(案4): 細かい升目(WELD_FINE_CELL_PX)での判定。5pxの升目では、縮小表示した細い管
+      // (15Aなど)の上を指示線が通っても升目の中心の光線が管に当たらず、見落とすことがあった。
+      // 描く直前の最終確認と、滑らかな移動の途中の確認だけに使う(置き場所探しは従来の升目のまま)。
+      atFine(sx, sy) {
+        const gx = Math.floor(sx / WELD_FINE_CELL_PX), gy = Math.floor(sy / WELD_FINE_CELL_PX);
+        const k = gx * 100000 + gy;
+        let v = cellsFine.get(k);
+        if (v === undefined) {
+          const cx = (gx + 0.5) * WELD_FINE_CELL_PX, cy = (gy + 0.5) * WELD_FINE_CELL_PX;
+          const o = unproj((cx / cw) * 2 - 1, 1 - (cy / ch) * 2, 1);
+          v = rayHitsBvh(tris, o[0], o[1], o[2], vx, vy, vz, 0, depthLen);
+          cellsFine.set(k, v);
+        }
+        return v;
+      },
+      // v531(案4): 線分 a→b のうちモデルの上を通る割合を、長さに応じて約2pxおきに調べる
+      segFracFine(a, b, skipEndPx) {
+        const dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy);
+        const usable = L - (skipEndPx || 0);
+        if (usable < 4) return 0;
+        const N = Math.max(4, Math.min(240, Math.ceil(usable / WELD_FINE_STEP_PX)));
+        let hit = 0;
+        for (let i = 0; i < N; i++) {
+          const t = (usable * (i + 0.5) / N) / L;
+          if (this.atFine(a.x + dx * t, a.y + dy * t)) hit++;
         }
         return hit / N;
       },
@@ -19237,6 +19269,139 @@ pmi._lineFarPoint = null;
     }
   }
 
+  // ---------- v531(案4): 溶接記号の指示線の最終確認 ----------
+  // 置き場所を決めた(resolveWeldLeaderCrossings)あとにも、画面の端・リボン・部品表パネルからの
+  // 押し戻し、回転中に前の位置を保つ処理(微動防止)、重なり確認による戻しが入り、
+  // 最終的に描く位置ではモデルを横切っていることがあった(この間は確認していなかった)。
+  // 描く直前の位置で、細かい升目(segFracFine)で指示線を調べ直し、横切っていれば
+  // 横切らない次の候補へ置き直す。どの候補も横切るときは、今の位置のままにする(悪くはしない)。
+  // 記号の中心P・枠の大きさgで置いたときの、折れ点・矢の先・横切る割合(細かい判定)
+  function weldFinalEval(w, P, g, mvp, cover) {
+    const oL = leaderModelPoint(w);
+    const O0 = oL ? project(mvp, oL) : null;
+    if (!O0) return null;
+    const ko = weldKneeOffset(w);
+    const rect = { x0: P.x - g.w / 2, x1: P.x + g.w / 2, y0: P.y - g.h / 2, y1: P.y + g.h / 2 };
+    const k1 = weldKneeFor(P, rect, O0, ko);
+    const tip = bestWeldTipFrom(w, mvp, k1.K, w._weldTipLocal);
+    if (!tip) return null;
+    const k2 = weldKneeFor(P, rect, tip.screen, ko);
+    let frac = cover.segFracFine(k2.K, tip.screen, 7);
+    // 矢の先が記号の中心に近いときは、反対の端から出た場合も調べ、悪い方で評価する(evalAtと同じ)
+    if (frac === 0 && Math.abs(tip.screen.x - P.x) < 24) {
+      const mirrorO = { x: tip.screen.x < P.x ? P.x + 1 : P.x - 1, y: tip.screen.y };
+      const k3 = weldKneeFor(P, rect, mirrorO, ko);
+      const K3 = { x: k3.K.x, y: P.y + ko.dy };
+      const adx = Math.abs(tip.screen.x - K3.x), dyN = tip.screen.y - K3.y;
+      K3.y += Math.min(80, Math.max(0, adx * 0.36 - Math.abs(dyN))) * (dyN >= 0 ? -1 : 1);
+      frac = Math.max(frac, cover.segFracFine(K3, tip.screen, 7));
+    }
+    return { frac, K: k2.K, tip, rect: { x0: rect.x0, x1: rect.x1, y0: rect.y0 + k2.dy, y1: rect.y1 + k2.dy } };
+  }
+  // 溶接記号を_screen(マーカー基準点)sに置いたとき、指示線がモデルを横切るか(細かい判定)。
+  // 判定できないときはnull
+  function weldFinalCrosses(w, s, mvp, cover, g) {
+    if (!cover) return null;
+    g = g || measureTagCenterOffset(w);
+    if (!g || !(g.w > 0)) return null;
+    const ev = weldFinalEval(w, { x: s.x + g.offX, y: s.y + g.offY }, g, mvp, cover);
+    return ev ? ev.frac > 0 : null;
+  }
+  const WELD_FINAL_BUDGET_MS = 8; // 1コマあたりの最終確認の置き直し探しの時間の上限
+  function weldFinalLeaderCheck(allScreenPmis, mvp) {
+    const cover = getScreenCover(mvp);
+    if (!cover) return;
+    const welds = allScreenPmis.filter((p) => p.category === 'weld' && !p.asRecorded && p._screen &&
+      p._modelAttachmentPoint && !p._noModelLeader);
+    if (!welds.length) return;
+    const t0 = performance.now();
+    const cw = cvSize().w, ch = cvSize().h;
+    const cr = cvRect();
+    const ribbonBottom = getRibbonHeightPx();
+    const banned = [];
+    { const d = getPartsTableDockRect(); if (d) banned.push({ x0: d.x0 - PTABLE_DOCK_GAP_PX, y0: d.y0 - PTABLE_DOCK_GAP_PX, x1: d.x1, y1: d.y1 }); }
+    { const b = getBomDrawerRect(); if (b) banned.push({ x0: b.x0 - PTABLE_DOCK_GAP_PX, y0: b.y0 - PTABLE_DOCK_GAP_PX, x1: b.x1, y1: b.y1 }); }
+    { const el = document.getElementById('occPanel');
+      if (el && !el.hidden) { const r = el.getBoundingClientRect(); banned.push({ x0: r.left - cr.left, y0: r.top - cr.top, x1: r.right - cr.left + 8, y1: r.bottom - cr.top + 8 }); } }
+    const ov = (a, b, m) => a.x0 - m < b.x1 && b.x0 - m < a.x1 && a.y0 - m < b.y1 && b.y0 - m < a.y1;
+    // 記号の枠の中にモデルがどれだけあるか(5×3点)
+    const rectOnModel = (r) => {
+      let h = 0;
+      for (let i = 0; i < 5; i++) for (let j = 0; j < 3; j++) if (cover.at(r.x0 + (r.x1 - r.x0) * (i + 0.5) / 5, r.y0 + (r.y1 - r.y0) * (j + 0.5) / 3)) h++;
+      return h / 15;
+    };
+    const geo = new Map();
+    const geoOf = (p) => { let g = geo.get(p); if (!g) { g = measureTagCenterOffset(p); geo.set(p, g); } return g; };
+    for (const w of welds) {
+      const g = geoOf(w);
+      if (!g || !(g.w > 0)) continue;
+      const P0 = { x: w._screen.x + g.offX, y: w._screen.y + g.offY };
+      const cur = weldFinalEval(w, P0, g, mvp, cover);
+      if (!cur || cur.frac === 0) { if (cur) w._finalFixKey = null; continue; }
+      if (performance.now() - t0 > WELD_FINAL_BUDGET_MS) break;
+      // ほかの番号・記号・寸法値の枠(この記号を置き直すときに重ならないようにする)
+      const otherRects = [];
+      for (const q of allScreenPmis) {
+        if (q === w || !q._screen) continue;
+        if (q.category === 'dimension') {
+          const r = q._dimFinalRect;
+          if (r && !q._dimWholeHidden && !q._dimThinHidden) otherRects.push({ x0: r.left - cr.left, x1: r.right - cr.left, y0: r.top - cr.top, y1: r.bottom - cr.top });
+          continue;
+        }
+        if (q.category !== 'weld' && q.category !== 'note') continue;
+        const gq = geoOf(q);
+        if (!gq) continue;
+        const cx = q._screen.x + gq.offX, cy = q._screen.y + gq.offY;
+        otherRects.push({ x0: cx - gq.w / 2, x1: cx + gq.w / 2, y0: cy - gq.h / 2, y1: cy + gq.h / 2 });
+      }
+      const placeOk = (ev) => {
+        const r = ev.rect;
+        if (r.x0 < 4 || r.y0 < Math.max(4, ribbonBottom + 4) || r.x1 > cw - 4 || r.y1 > ch - 4) return false;
+        if (banned.some((b) => ov(r, b, 0))) return false;
+        return true;
+      };
+      let best = null;
+      const consider = (P, key, bonus) => {
+        const ev = weldFinalEval(w, P, g, mvp, cover);
+        if (!ev || ev.frac > 0 || !placeOk(ev)) return;
+        const len = Math.hypot(ev.K.x - ev.tip.screen.x, ev.K.y - ev.tip.screen.y);
+        if (len > LEADER_HARD_PX) return;
+        let c = Math.hypot(P.x - P0.x, P.y - P0.y) * 0.5 + leaderLenPenalty(len) + (bonus || 0);
+        const ang = weldApproachBadAt(w, ev.tip, ev.K);
+        c += ang * 2000 + (ang > WELD_APPROACH_OK ? 1500 : 0);
+        const om = rectOnModel(ev.rect);
+        c += om * 6000 + (om > 0 ? 1500 : 0);
+        for (const r of otherRects) if (ov(ev.rect, r, 6)) { c += 20000; break; }
+        if (w._finalFixKey === key) c -= 600; // 前のコマと同じ候補を有利に(回転中に飛び回らないように)
+        if (!best || c < best.c) best = { P, c, key };
+      };
+      // 1) 置き場所探しの結果(押し戻し・微動防止の前の位置)
+      if (w._rawLayoutPos) consider({ x: w._rawLayoutPos.x + g.offX, y: w._rawLayoutPos.y + g.offY }, 'raw', 0);
+      // 2) 矢の先のまわり(24方向×5通りの距離)
+      const oL = leaderModelPoint(w);
+      const O0 = oL ? project(mvp, oL) : null;
+      if (O0) {
+        const L0 = 60;
+        for (let k = 0; k < 24; k++) {
+          const a = k * Math.PI / 12, dx = Math.cos(a), dy = Math.sin(a);
+          for (const mul of [0.4, 0.7, 1.05, 1.5, 2.0]) {
+            const dist = L0 * mul + Math.abs(dx) * g.w / 2 + Math.abs(dy) * g.h / 2;
+            consider({ x: O0.x + dx * dist, y: O0.y + dy * dist }, k + '|' + mul, 0);
+          }
+          if (performance.now() - t0 > WELD_FINAL_BUDGET_MS * 2) break;
+        }
+      }
+      if (!best) { w._finalFixKey = null; continue; } // 横切らない候補が無い → 今の位置のまま
+      w._finalFixKey = best.key;
+      w._screen.x = best.P.x - g.offX;
+      w._screen.y = best.P.y - g.offY;
+      w._finalFixed = true;
+      // 微動防止の基準(前のコマのずらし量)も置き直した位置に合わせ、次のコマで元へ戻されないようにする
+      if (w._anchorScreen) { w._noteRelDX = w._screen.x - w._anchorScreen.x; w._noteRelDY = w._screen.y - w._anchorScreen.y; w._notePend = null; }
+      if (noteHoverFreeze) noteHoverFreeze.delete(w.id);
+    }
+  }
+
   const DIM_TEXT_CLEAR_MARGIN_PX = 5;
   // v515: マウスを近づけて拡大表示している寸法値は、注記(照合番号のバルーンなど)の
   // 置き場所を決めるときだけ普段の大きさとして扱う。拡大に合わせてバルーンが
@@ -21929,6 +22094,9 @@ pmi._lineFarPoint = null;
           }
         }
       } catch (e) { console.warn('重なりの確認に失敗しました', e); }
+      // v531(案4): 押し戻し・微動防止・重なり確認のあとの最終位置で、溶接記号の指示線が
+      // モデルを横切っていないかを細かく調べ直し、横切っていれば横切らない候補へ置き直す
+      try { weldFinalLeaderCheck(allScreenPmis, mvp); } catch (err) { console.warn('溶接記号の指示線の最終確認に失敗しました', err); }
       // v527: 注記・溶接記号の置き場所の変化をなめらかに(目標位置へ少しずつ近づける)
       // v530: 動き方を自然に。(1) 指示線の先(指している点)を中心に、角度と距離に分けて動かす
       // (反対側へ移るときに指している点の上を素通りせず、指示線の長さを保ったまま弧を描いて回り込む)
