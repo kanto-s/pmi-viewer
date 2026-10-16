@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v535</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v536</div>
   <!-- v338: 寸法値の位置決めロジック(render()内)が実際に毎フレーム
        計算している値を、画面上でそのまま確認できる簡易デバッグ表示。
        選択中のPMIが寸法のときだけ表示される。開発者ツールを開かなくても
@@ -1310,6 +1310,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v536: 溶接記号が、ほかの溶接記号・照合番号・寸法値の文字と重ならないように、また指示線や寸法線が溶接記号の上を通らない(溶接記号の指示線もほかの文字の上を通らない)ようにしました(指示線どうしの交差は対象外)。</li>
         <li>v535: サブアセンブリを選んで「周りを薄く」表示しているとき、溶接記号と指示線は、薄くした周りの部品とも空きがあれば重ならない場所に置くようにしました(選んだ部分には重ねない。薄い部品は、近くに空きが無ければ重なってもよい)。</li>
         <li>v534: 溶接記号の指示線・記号がモデルに重ならないようにしました(矢の先に継ぎ目の輪郭近くの点も使い、外側から当てる。確かめた矢の先をそのまま描く。近くに空きが無ければ指示線を長くしてモデルの外に置く。記号がモデルに乗る位置も避ける。矢尻の部分が継ぎ目の縁に触れるのは対象外)。</li>
         <li>v533: 溶接記号の指示線がモデルの上を通らないよう、描く直前の最終的な位置でもう一度細かく確かめるようにしました(画面の端・パネルからの押し戻しや、前の位置を保つ処理のあとに横切っていれば、横切らない置き場所へ移します。細い管も見落とさないよう約2pxおきに調べます)。</li>
@@ -19383,6 +19384,8 @@ pmi._lineFarPoint = null;
     const t0 = performance.now();
     const cw = cvSize().w, ch = cvSize().h;
     const cr = cvRect();
+    let dimSegs = [];
+    try { dimSegs = collectDimScreenSegs(allScreenPmis, mvp); } catch (e) { dimSegs = []; } // v536: 寸法線・寸法補助線
     const coverAll = (occView === 'ghost' && occSelected >= 0 && modelAllTris && modelOcclusionTris !== modelAllTris) ? getScreenCover(mvp, true) : null; // v535
     const ribbonBottom = getRibbonHeightPx();
     const banned = [];
@@ -19420,16 +19423,8 @@ pmi._lineFarPoint = null;
       // v534: 描くときに同じ矢の先を使う(今の位置のままでよい場合も、置き直す場合も)
       const forceTip = (ev) => { w._weldTipForce = ev && ev.tip && ev.tip.local ? { local: ev.tip.local, ang: ev.tip.ang || 0, seq: weldFinalSeq } : null; };
       forceTip(cur);
-      const curGhost = (cur && coverAll) ? ghostOver(cur) : 0;
-      const ghostOnly = !!cur && cur.frac === 0 && rectOnModel(cur.rect) === 0 && curGhost > 0;
-      if (!cur || (cur.frac === 0 && rectOnModel(cur.rect) === 0 && !ghostOnly)) { if (cur) w._finalFixKey = null; continue; }
-      if (performance.now() - t0 > WELD_FINAL_BUDGET_MS) {
-        // 時間切れ: 残りは次のコマで調べる(画面が止まっていても、もう1コマ描くようにする)
-        declutterSettleUntil = Math.max(declutterSettleUntil, performance.now() + 300); markRenderActive(300);
-        break;
-      }
       // ほかの番号・記号・寸法値の枠(この記号を置き直すときに重ならないようにする)
-      const otherRects = [];
+      const otherRects = [], otherLeaders = [];
       for (const q of allScreenPmis) {
         if (q === w || !q._screen) continue;
         if (q.category === 'dimension') {
@@ -19442,6 +19437,36 @@ pmi._lineFarPoint = null;
         if (!gq) continue;
         const cx = q._screen.x + gq.offX, cy = q._screen.y + gq.offY;
         otherRects.push({ x0: cx - gq.w / 2, x1: cx + gq.w / 2, y0: cy - gq.h / 2, y1: cy + gq.h / 2 });
+        // v536: ほかの番号・記号の指示線(モデル側の点→番号・記号の中心)
+        const oq = leaderModelPoint(q);
+        const Oq = (oq && !q.asRecorded && !q._noModelLeader) ? project(mvp, oq) : null;
+        if (Oq) otherLeaders.push([Oq, { x: cx, y: cy }]);
+      }
+      // v536: 文字(記号・番号・寸法値)と重なるのは趣旨に合わないので、モデルとの重なりと同じく避ける。
+      //   ・記号の枠がほかの記号・番号・寸法値の枠に重なる
+      //   ・この記号の指示線が、ほかの記号・番号・寸法値の上を通る
+      //   ・ほかの指示線、寸法線・寸法補助線が、この記号の上を通る
+      // (指示線どうしの交差は対象外)
+      const textHits = (ev) => {
+        if (!ev) return 0;
+        let n = 0;
+        for (const r of otherRects) {
+          if (ov(ev.rect, r, 4)) n++;
+          if (segTouchesRect(ev.K, ev.tip.screen, r, 2)) n++;
+        }
+        for (const [a, b] of otherLeaders) if (segTouchesRect(a, b, ev.rect, 2)) n++;
+        for (const [a, b] of dimSegs) if (segTouchesRect(a, b, ev.rect, 2)) n++;
+        return n;
+      };
+      const curText = textHits(cur);
+      const curGhost = (cur && coverAll) ? ghostOver(cur) : 0;
+      const curModelOk = !!cur && cur.frac === 0 && rectOnModel(cur.rect) === 0;
+      const ghostOnly = curModelOk && curText === 0 && curGhost > 0;
+      if (!cur || (curModelOk && curText === 0 && !ghostOnly)) { if (cur) w._finalFixKey = null; continue; }
+      if (performance.now() - t0 > WELD_FINAL_BUDGET_MS) {
+        // 時間切れ: 残りは次のコマで調べる(画面が止まっていても、もう1コマ描くようにする)
+        declutterSettleUntil = Math.max(declutterSettleUntil, performance.now() + 300); markRenderActive(300);
+        break;
       }
       const placeOk = (ev) => {
         const r = ev.rect;
@@ -19461,13 +19486,14 @@ pmi._lineFarPoint = null;
         c += ang * 2000 + (ang > WELD_APPROACH_OK ? 1500 : 0);
         const om = rectOnModel(ev.rect);
         c += om * 6000 + (om > 0 ? 20000 : 0); // v534: 記号がモデルに乗るのも、指示線が横切るのと同じく避ける
-        for (const r of otherRects) if (ov(ev.rect, r, 6)) { c += 20000; break; }
+        c += textHits(ev) * 50000; // v536: 文字との重なりは、モデルとの重なりと同じく必ず避ける(1つでもあれば、無い候補より必ず不利)
         if (coverAll) c += ghostOver(ev) * 40; // v535: 薄い部品との重なりは少ないほどよい(避けきれなくてもよい)
         if (w._finalFixKey === key) c -= 600; // 前のコマと同じ候補を有利に(回転中に飛び回らないように)
         if (!best || c < best.c) best = { P, c, key, ev };
       };
       // v535: 薄い部品とだけ重なっているときは、今の位置も候補に入れ(動かす方がよいときだけ動かす)、近くだけを探す
-      if (ghostOnly) consider(P0, 'cur', 0, cur);
+      // 今の位置がモデルとは重なっていなければ、今の位置も候補に入れる(よりよいときだけ動かす)
+      if (curModelOk) consider(P0, 'cur', 0, cur);
       // 1) 置き場所探しの結果(押し戻し・微動防止の前の位置)
       if (w._rawLayoutPos) consider({ x: w._rawLayoutPos.x + g.offX, y: w._rawLayoutPos.y + g.offY }, 'raw', 0);
       // 2) 矢の先のまわり(24方向×5通りの距離)
@@ -19487,7 +19513,7 @@ pmi._lineFarPoint = null;
         };
         ring([0.4, 0.7, 1.05, 1.5, 2.0]);
         // v534: 近くに無ければ、遠く(指示線 WELD_FINAL_FAR_LEADER_PX まで)から探す。長いほど不利(leaderLenPenalty)
-        const farOk = (b) => b && b.c < 15000; // ほかの記号と重なる候補しか無いときも遠くを探す
+        const farOk = (b) => b && b.c < 15000; // ほかの記号・文字と重なる候補しか無いときも遠くを探す
         if (!ghostOnly && !farOk(best)) { lenLimit = WELD_FINAL_FAR_LEADER_PX; ring([2.6, 3.3, 4.1, 5.0, 6.0]); }
       }
       // v534: 矢の先から探す。見えている継ぎ目の点ごとに、その点の外向き(継ぎ目の外側)へ指示線を伸ばし、
