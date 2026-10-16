@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v530</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v531</div>
   <!-- v338: 寸法値の位置決めロジック(render()内)が実際に毎フレーム
        計算している値を、画面上でそのまま確認できる簡易デバッグ表示。
        選択中のPMIが寸法のときだけ表示される。開発者ツールを開かなくても
@@ -1310,6 +1310,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v531: モデルを回転している間は、照合番号(バルーン)・溶接記号の置き場所を変えないようにしました(指している点から見た指示線の長さ・向きは回転を始めたときのまま、モデルと一緒に動くだけ)。回転を止めた瞬間(指・マウスを離したとき、または動きが0.18秒止まったとき)に置き場所を計算し直し、指している点を中心に弧を描くように新しい位置へ移します
         <li>v530: 照合番号(バルーン)・溶接記号の置き場所が変わるときの動きを自然にしました。(1) 指している点を中心に、指示線の長さを保ったまま弧を描いて回り込むように動きます(反対側へ移るときに、指している部品の上を素通りしたり、指示線が一度縮んでまた伸びたりしません) (2) 動き出しと止まり際がなめらかなばねの動き(約0.3秒)にし、急に飛び出してからゆっくり尾を引く動きをなくしました。指している点が変わるときも、いまの位置から続けて動きます(寸法値の移動も同じなめらかな動きにしました)
         <li>v529: 溶接記号の指示線が、指している点の手前でモデル(パイプなど)を貫通しないようにしました。横切る置き場所・矢の先は、横切らないものがある限り選びません(照合番号と同じ扱い)
         <li>v528: (あわせて、1コマの描画が重い端末で、表示し始めの注記が薄いまま止まったり、移動の途中で止まって重なったままになる不具合を直しました) 回転を止めたときや小さな揺れを抑えるために前の位置へ残した照合番号・溶接記号が、ほかの番号・記号や指示線、寸法値・寸法線と重なってしまう場合は、前の位置を保たずに重なりを避けた位置へ移すようにしました
@@ -8236,6 +8237,16 @@
     if (ev === 'pointermove' && !e.buttons) return;
     lastUserViewInputAt = performance.now();
   }, { passive: true, capture: true }));
+  // v531: 視点を動かしている最中かどうか。指・マウスを離した瞬間、または動きが
+  // VIEW_STILL_MS 止まった瞬間に「止めた」とみなす(照合番号・溶接記号はその瞬間に置き直す)
+  const VIEW_STILL_MS = 180;
+  let lastUserViewReleaseAt = -1e9, pmiViewWasMoving = false;
+  ['pointerup', 'pointercancel', 'touchend', 'touchcancel'].forEach((ev) => window.addEventListener(ev, () => {
+    lastUserViewReleaseAt = performance.now();
+  }, { passive: true, capture: true }));
+  function isUserViewMoving(now) {
+    return now - lastUserViewInputAt < VIEW_STILL_MS && lastUserViewInputAt > lastUserViewReleaseAt;
+  }
   let lastDeclutterStateKey = null; // v177: 重なり回避の再計算スロットル用(render()参照)
   function composeWorldMatrix(t, q, s) {
     const m = mat4FromQuat(q);
@@ -20106,6 +20117,15 @@ pmi._lineFarPoint = null;
   function renderFrame() {
     restorePmiGhosts();
     try { updateDimHolds(); } catch (e) { console.warn('updateDimHolds failed:', e); }
+    { // v531: 回転を止めた瞬間に、照合番号・溶接記号の置き場所を計算し直して移す
+      const t = performance.now();
+      const moving = isUserViewMoving(t);
+      if (pmiViewWasMoving && !moving) {
+        declutterSettleUntil = Math.max(declutterSettleUntil, t + DECLUTTER_SETTLE_MS);
+        markRenderActive(600);
+      }
+      pmiViewWasMoving = moving;
+    }
     if (!pmiGeometryDirty && performance.now() > renderActiveUntil && performance.now() > declutterSettleUntil) {
       requestAnimationFrame(render);
       return;
@@ -21913,6 +21933,10 @@ pmi._lineFarPoint = null;
       // (反対側へ移るときに指している点の上を素通りせず、指示線の長さを保ったまま弧を描いて回り込む)
       // (2) 動き出し・止まり際がなめらかなばね(臨界減衰)の動きにする(急発進・ゆっくり尾を引く動きをなくす)
       pmiSmoothLayoutSeq++;
+      // v531: 回転中(視点を動かしている間)は置き場所を変えない。指示線の先から見た位置
+      // (指示線の長さ・向き)を回転を始めたときのまま保ち、モデルと一緒に動かすだけにする。
+      // 回転を止めた瞬間に、上で計算した置き場所へ(弧を描くばねの動きで)移す。
+      const viewMovingNow = isUserViewMoving(performance.now());
       for (const pmi of allScreenPmis) {
         if ((pmi.category !== 'note' && pmi.category !== 'weld') || pmi.asRecorded || !pmi._anchorScreen) { pmi._tgtDX = null; continue; }
         pmi._tgtDX = pmi._screen.x - pmi._naturalScreenX; pmi._tgtDY = pmi._screen.y - pmi._naturalScreenY;
@@ -21924,6 +21948,20 @@ pmi._lineFarPoint = null;
         if (!O) O = pmi._anchorScreen;
         // 回転の中心は記号(丸)の中心に近い点にする(要素の左端ではなく)
         const cx = (pmi._tagW || 40) / 2;
+        if (viewMovingNow && contiguous) {
+          const st = pmi._smPolar;
+          if (st && st.tip !== tipL && st.ax != null) { // 溶接記号の矢の先が変わったときは、記号の位置を保ったまま引き継ぐ
+            const dx = st.ax - O.x, dy = st.ay - O.y; st.r = Math.hypot(dx, dy); st.a = Math.atan2(dy, dx); st.tip = tipL;
+          }
+          if (st && st.tip === tipL && performance.now() - st.t <= 300) {
+            // 前のコマの見た目の位置(指示線の先から見た角度・距離)をそのまま使う
+            if (st.f !== pmiSmoothFrame) { st.va = 0; st.vr = 0; st.t = performance.now(); st.f = pmiSmoothFrame; }
+            const x = O.x + Math.cos(st.a) * st.r, y = O.y + Math.sin(st.a) * st.r;
+            st.ax = x; st.ay = y;
+            pmi._screen.x = x - cx; pmi._screen.y = y;
+            continue;
+          }
+        }
         const p = smoothAround(pmi, '_smPolar', O, pmi._screen.x + cx, pmi._screen.y, tipL, contiguous);
         pmi._screen.x = p.x - cx; pmi._screen.y = p.y;
       }
