@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v540</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v541</div>
   <!-- v338: 寸法値の位置決めロジック(render()内)が実際に毎フレーム
        計算している値を、画面上でそのまま確認できる簡易デバッグ表示。
        選択中のPMIが寸法のときだけ表示される。開発者ツールを開かなくても
@@ -1310,6 +1310,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v541: 溶接記号が指している継ぎ目を、モデルの陰になる部分も含めて全周明るく描くようにしました(陰の部分は少し細く透かして描く)。</li>
         <li>v540: 溶接記号が指している継ぎ目の強調を、縁取りや矢の先の輪をやめて、継ぎ目の線そのものを明るい白い線で描く形にしました。</li>
         <li>v539: 溶接記号が指している継ぎ目を、配管の色と見分けやすいマゼンタの太い線(暗い縁取り付き)で強調するようにしました。矢の先にも同じ色の輪を付け、矢と継ぎ目の対応を分かりやすくしました。選んだ溶接記号は、さらに太く強調します。</li>
         <li>v538: 溶接記号の矢がモデルの裏側を指さないよう、矢の先の点の面が実際にこちらを向いているかをモデルの面の向き(法線)でも確かめるようにしました。継ぎ目のほとんどが裏側になる向きでは、溶接記号を出しません。</li>
@@ -20997,7 +20998,7 @@ pmi._lineFarPoint = null;
           const px = 2 / Math.max(1, canvas.width), py = 2 / Math.max(1, canvas.height);
           const dpr = window.devicePixelRatio || 1;
           const disc = (r) => { const o = []; const R = Math.ceil(r); for (let dx = -R; dx <= R; dx++) for (let dy = -R; dy <= R; dy++) if (dx * dx + dy * dy <= r * r + 0.01) o.push([dx, dy]); return o; };
-          const HALO_N = disc(3.2), CORE_N = disc(1.5), HALO_S = disc(4.2), CORE_S = disc(2.3);
+          const HALO_N = disc(3.2), CORE_N = disc(1.5), HALO_S = disc(4.2), CORE_S = disc(2.3), HIDDEN_N = disc(1.0);
           const drawOff = (line, offs, color) => {
             for (const [sx, sy] of offs) { gl.uniform2f(uNdcShiftLoc, sx * px * dpr, sy * py * dpr); drawLines(line, color); }
           };
@@ -21017,18 +21018,18 @@ pmi._lineFarPoint = null;
             // v540: 暗い縁取りはやめ、明るい線だけを描く(選んだ溶接記号は少し太く)
             drawOff(w._weldJointLine, sel ? CORE_S : CORE_N, COLOR_WELD_SEAM);
             gl.uniform2f(uNdcShiftLoc, 0, 0);
-            if (sel) {
-              // 選んだ溶接記号は、モデルの陰になっている部分も細く薄く透かして描く(継ぎ目が一周していることが分かるように)
-              gl.depthFunc(gl.GREATER);
-              gl.depthMask(false);
-              gl.enable(gl.BLEND);
-              gl.blendColor(0, 0, 0, 0.45);
-              gl.blendFunc(gl.CONSTANT_ALPHA, gl.ONE_MINUS_CONSTANT_ALPHA);
-              drawLines(w._weldJointLine, COLOR_WELD_SEAM);
-              gl.disable(gl.BLEND);
-              gl.depthMask(true);
-              gl.depthFunc(gl.LESS);
-            }
+            // v541: モデルの陰になっている部分も含めて、継ぎ目を全周明るく描く(すべての溶接記号)。
+            // 陰の部分は、手前の部分と区別できるよう少し細く・少し透かして描く。
+            gl.depthFunc(gl.GREATER);
+            gl.depthMask(false);
+            gl.enable(gl.BLEND);
+            gl.blendColor(0, 0, 0, 0.8);
+            gl.blendFunc(gl.CONSTANT_ALPHA, gl.ONE_MINUS_CONSTANT_ALPHA);
+            drawOff(w._weldJointLine, sel ? CORE_N : HIDDEN_N, COLOR_WELD_SEAM);
+            gl.uniform2f(uNdcShiftLoc, 0, 0);
+            gl.disable(gl.BLEND);
+            gl.depthMask(true);
+            gl.depthFunc(gl.LESS);
           }
           gl.uniform2f(uNdcShiftLoc, 0, 0);
           gl.uniform1f(uDepthBiasLoc, 0);
