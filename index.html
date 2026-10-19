@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v544</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v545</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1314,6 +1314,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v545: 照合番号などの注記の指示線が、モデルから浮いて(画面上でモデルに届かずに)見えることがあった問題を修正しました。指示線の先がモデルの上に無いときは、指示線の向きはそのままモデルに届くところまで延ばしてくっつけます(届かないときは近くのモデルの点へ寄せます)。</li>
         <li>v544: 照合番号(バルーン)などの注記を寸法の線・寸法値と重ならない位置へずらせないときは、その角度に限り、重なっている寸法の方を寸法線・寸法補助線・寸法値ごとまとめて表示しないようにしました。視点を変えて重ならなくなると、また表示されます(同じ視点のまま出たり消えたりはしません)。</li>
         <li>v543: 照合番号(バルーン)などの注記が、見る角度によって寸法線・寸法補助線・寸法値の文字に重なったまま残ることがあった問題を修正しました。描く直前の最終位置で確かめ、番号の丸に寸法の線がかかる・寸法値に重なる・指示線が寸法値の上を通るときは、重ならなくなる位置まで番号をずらします(モデルやほかの部品の上には置かず、指示線もほかの部品の上を通しません。回転中は置き場所を変えず、止めたときにずらします)。</li>
         <li>v542: 画面左下に、X(赤)・Y(緑)・Z(青)の座標軸の向きを表示するようにしました(モデルと一緒に回り、いまどちらを向いているかが分かる)。</li>
@@ -18250,6 +18251,41 @@ pmi._lineFarPoint = null;
     return false;
   }
 
+  // v545: 注記の指示線の先(画面座標 O)がモデルの上に無いとき、番号側(clip、ページ座標)から
+  // O へ向かう向きのまま先へ延ばして、最初にモデルに当たる点を返す。
+  const LEADER_SNAP_EXTEND_PX = 40, LEADER_SNAP_NEAR_PX = 10;
+  function snapLeaderTipToModel(mvp, O, clipX, clipY) {
+    const cover = getScreenCover(mvp);
+    if (!cover || !O) return null;
+    const on = (x, y) => cover.atFine(x, y);
+    // すでにモデルの上(またはすぐ際)なら何もしない
+    if (on(O.x, O.y) || on(O.x + 1, O.y) || on(O.x - 1, O.y) || on(O.x, O.y + 1) || on(O.x, O.y - 1)) return null;
+    const cr = cvRect();
+    const kx = clipX - cr.left, ky = clipY - cr.top;
+    let ux = O.x - kx, uy = O.y - ky;
+    const L = Math.hypot(ux, uy);
+    if (L > 1e-6) {
+      ux /= L; uy /= L;
+      for (let d = 1; d <= LEADER_SNAP_EXTEND_PX; d += 1) {
+        const x = O.x + ux * d, y = O.y + uy * d;
+        if (on(x, y)) return { x: O.x + ux * (d + 1.5), y: O.y + uy * (d + 1.5), depth: O.depth };
+      }
+    }
+    // 向きに沿って届かないときは、近くのモデルの点へ寄せる(近い順)
+    for (let r = 2; r <= LEADER_SNAP_NEAR_PX; r += 2) {
+      const n = Math.max(8, Math.round(r * 3));
+      let best = null;
+      for (let i = 0; i < n; i++) {
+        const a = i / n * Math.PI * 2, x = O.x + Math.cos(a) * r, y = O.y + Math.sin(a) * r;
+        if (!on(x, y)) continue;
+        // 番号から遠ざかりすぎない(指示線の向きが大きく変わらない)点を選ぶ
+        const dev = L > 1e-6 ? Math.abs(Math.cos(a) * uy - Math.sin(a) * ux) : 0;
+        if (!best || dev < best.dev) best = { x: x + Math.cos(a) * 1.5, y: y + Math.sin(a) * 1.5, dev };
+      }
+      if (best) return { x: best.x, y: best.y, depth: O.depth };
+    }
+    return null;
+  }
   function project(mvp, p) {
     const clip = transformPoint(mvp, { x: p[0], y: p[1], z: p[2] });
     if (clip.w <= 0.0001) return null;
@@ -22861,6 +22897,15 @@ pmi._lineFarPoint = null;
           // カテゴリに限り、この太さにもweldNotationScale()を掛けて、
           // 記号を大きくするほど指示線も太く見えるようにした(他カテゴリ
           // (注記)はこれまで通り太さ1のまま)。
+          // v545: 指示線のモデル側の端がモデルから浮いて見える(画面上でモデルに届いていない)ときは、
+          // 指示線の向きはそのままに、モデルに届くところまで延ばしてくっつける。
+          // 延ばしても届かない(40px以内に無い)ときは、近く(10px以内)のモデルの点へ寄せる。
+          if (pmi.category === 'note') {
+            try {
+              const snapped = snapLeaderTipToModel(mvp, modelScreen, clipX, clipY);
+              if (snapped) { modelScreen = snapped; pmi._modelScreenForHit = modelScreen; }
+            } catch (e) { /* 寄せられなければそのまま */ }
+          }
           const connectorStrokeWidth = pmi.category === 'weld' ? (1 * weldNotationScale()) : 1;
           svgLines.push(
             '<line x1="' + modelScreen.x + '" y1="' + modelScreen.y + '" x2="' + clipX + '" y2="' + clipY + '"' +
