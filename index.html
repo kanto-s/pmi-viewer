@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v547</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v548</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1314,6 +1314,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v548: 照合番号(バルーン)などの指示線が、指している配管の中心を向くようにしました(画面上の配管の幅の真ん中へ向けて引き、配管の外形に触れたところで止めます)。</li>
         <li>v547: 寸法補助線・注記の指示線をモデルの中まで描かず、モデルの外形に触れたところで切るようにしました(浮いているときは外形に触れるところまで延ばし、そこで止めます)。</li>
         <li>v546: 寸法補助線のモデル側の端が、画面上でモデルから浮いて見えることがあった問題を修正しました。モデルに届いていないときは、寸法補助線の向きのまま、モデルに当たるところまで延ばしてくっつけます。</li>
         <li>v545: 照合番号などの注記の指示線が、モデルから浮いて(画面上でモデルに届かずに)見えることがあった問題を修正しました。指示線の先がモデルの上に無いときは、指示線の向きはそのままモデルに届くところまで延ばしてくっつけます(届かないときは近くのモデルの点へ寄せます)。</li>
@@ -18256,25 +18257,51 @@ pmi._lineFarPoint = null;
   // v545: 注記の指示線の先(画面座標 O)がモデルの上に無いとき、番号側(clip、ページ座標)から
   // O へ向かう向きのまま先へ延ばして、最初にモデルに当たる点を返す。
   const LEADER_SNAP_EXTEND_PX = 40, LEADER_SNAP_NEAR_PX = 10;
+  // v548: 指している点(モデルの上の点 P)のまわりで、画面上の配管の太さ方向(いちばん幅の狭い向き)を
+  // 調べ、その幅の真ん中(配管の中心線上の点)を返す。配管らしくない(幅が広すぎる)ときは null。
+  const PIPE_CENTER_MAX_HALF_PX = 90;
+  function pipeCenterOnScreen(cover, P) {
+    const on = (x, y) => cover.atFine(x, y);
+    if (!on(P.x, P.y)) return null;
+    const run = (ux, uy) => { let d = 0; while (d < PIPE_CENTER_MAX_HALF_PX && on(P.x + ux * (d + 1), P.y + uy * (d + 1))) d += 1; return d; };
+    let best = null;
+    for (let k = 0; k < 18; k++) {
+      const a = k * Math.PI / 18, ux = Math.cos(a), uy = Math.sin(a);
+      const r1 = run(ux, uy), r2 = run(-ux, -uy);
+      if (r1 >= PIPE_CENTER_MAX_HALF_PX || r2 >= PIPE_CENTER_MAX_HALF_PX) continue;
+      const w = r1 + r2;
+      if (!best || w < best.w) best = { w, ux, uy, r1, r2 };
+    }
+    if (!best) return null;
+    const m = (best.r1 - best.r2) / 2;
+    return { x: P.x + best.ux * m, y: P.y + best.uy * m };
+  }
   function snapLeaderTipToModel(mvp, O, clipX, clipY) {
     if (!O) return null;
     const cr = cvRect();
     const K = { x: clipX - cr.left, y: clipY - cr.top };
-    // v547: 指示線はモデルの外形に触れたところで止める(モデルの中までは描かない)。
-    // 浮いているときは向きのまま外形に触れるところまで延ばす。
-    const r = cutLineAtModelOutline(mvp, O, K, LEADER_SNAP_EXTEND_PX);
-    if (r && (r.x !== O.x || r.y !== O.y)) return r;
-    // 向きに沿って届かず、すぐ近くにモデルがあるときだけ寄せる
     const cover = getScreenCover(mvp);
-    if (!cover || cover.atFine(O.x, O.y)) return null;
-    for (let rr = 2; rr <= LEADER_SNAP_NEAR_PX; rr += 2) {
-      const n = Math.max(8, Math.round(rr * 3));
-      for (let i = 0; i < n; i++) {
-        const a = i / n * Math.PI * 2, x = O.x + Math.cos(a) * rr, y = O.y + Math.sin(a) * rr;
-        if (cover.atFine(x, y)) return { x, y, depth: O.depth };
+    if (!cover) return null;
+    // 1) 指している点がモデルから浮いているときは、向きのまま外形に触れるところまで延ばす(v545)
+    let P = O;
+    if (!cover.atFine(O.x, O.y)) {
+      const r = cutLineAtModelOutline(mvp, O, K, LEADER_SNAP_EXTEND_PX);
+      if (r && (r.x !== O.x || r.y !== O.y)) P = { x: r.x + (r.x - K.x) / (Math.hypot(r.x - K.x, r.y - K.y) || 1) * 1.5, y: r.y + (r.y - K.y) / (Math.hypot(r.x - K.x, r.y - K.y) || 1) * 1.5 };
+      else {
+        let found = null;
+        for (let rr = 2; rr <= LEADER_SNAP_NEAR_PX && !found; rr += 2) {
+          const n = Math.max(8, Math.round(rr * 3));
+          for (let i = 0; i < n; i++) { const a = i / n * Math.PI * 2, x = O.x + Math.cos(a) * rr, y = O.y + Math.sin(a) * rr; if (cover.atFine(x, y)) { found = { x, y }; break; } }
+        }
+        if (!found) return null;
+        P = found;
       }
     }
-    return null;
+    // 2) v548: 照合番号(バルーン)は、配管の中心を向くようにする。指している点の配管の幅の真ん中へ向けて
+    //    指示線を引き、(v547) モデルの外形に触れたところで切る。
+    const C = pipeCenterOnScreen(cover, P) || P;
+    const cut = cutLineAtModelOutline(mvp, { x: C.x, y: C.y, depth: O.depth }, K, 0);
+    return cut ? { x: cut.x, y: cut.y, depth: O.depth } : { x: C.x, y: C.y, depth: O.depth };
   }
   function project(mvp, p) {
     const clip = transformPoint(mvp, { x: p[0], y: p[1], z: p[2] });
