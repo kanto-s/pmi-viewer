@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v557</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v558</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1314,6 +1314,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v558: サブアセンブリを選んだ状態で、選択パネルの表示方法を「全体」にしても、選んだサブアセンブリの照合番号しか出なかった問題を修正しました。「全体」では全体の照合番号・PMIを表示します(「周りを薄く」「単体のみ」では従来どおり選んだ部分のPMIを表示)。</li>
         <li>v557: サブアセンブリを選んだ後に「全体表示に戻す」を押すと、直前に選んでいたサブアセンブリの照合番号しか出なかった問題を修正しました。「全体表示に戻す」でサブアセンブリの選択も解除し、全体の照合番号・PMIを表示します。</li>
         <li>v556: 「PMIを一斉表示」のときに動きが重くなる問題を軽くしました。回転中は、表示し続けている照合番号・溶接記号の置き場所探しを省き(回転中は置き場所を変えないため)、寸法の線との重なりの判定も近くの線だけを調べるようにしました(結果は同じ)。</li>
         <li>v555: 照合番号(バルーン)をもっと指している配管の近くに置くようにしました(指示線の目安の長さ 約28px、上限 約50px)。</li>
@@ -11538,11 +11539,13 @@
     // 部品・上位のアセンブリ)を選んだときだけ表示する。何も選んでいないとき・
     // 最上位を選んでいるときは、親のSTEPのPMIだけを表示する。
     if (pmi._subOcc != null) {
-      if (occSelected < 0 || !occNodes.length || occNodes[occSelected].parent < 0) return false;
+      if (occSelected < 0 || !occNodes.length || occNodes[occSelected].parent < 0 || occView === 'all') return false; // v558
       return pmiBelongsToOcc(pmi, occSelected);
     }
     if (occSelected < 0 || !occPmiOnlySelected || !occNodes.length) return true;
     if (occNodes[occSelected].parent < 0) return true; // 最上位を選んでいるときは全部
+    // v558: 選択パネルの表示方法を「全体」にしたときは、選んだサブアセンブリに絞らず、全体の照合番号・PMIを表示する
+    if (occView === 'all') return true;
     // v422: サブアセンブリのSTEPを読み込んでいるときは、サブアセンブリ(またはその中の
     // 部品)を選んでいる間、親アセンブリのSTEPに乗っているPMIは一切表示しない
     // (サブアセンブリのSTEPに乗っているPMIだけを表示する)。
@@ -11555,7 +11558,7 @@
   }
   // サブアセンブリ選択でPMIを絞り込んでいる間は、前後判定などによる自動の非表示を行わない
   function occShowsAllPmi() {
-    return occSelected >= 0 && occPmiOnlySelected && occNodes.length > 0 && occNodes[occSelected].parent >= 0;
+    return occSelected >= 0 && occView !== 'all' && occPmiOnlySelected && occNodes.length > 0 && occNodes[occSelected].parent >= 0; // v558
   }
   function occPmiCounts(idx) {
     const c = { dimension: 0, note: 0, weld: 0, total: 0 };
@@ -11602,14 +11605,14 @@
   const OCC_PLANE_DEADBAND_RATIO = 0.08; // v513: 境目付近の揺らぎ対策で緩衝地帯を広げた(旧0.04)
   function pmiOcclusionMargin() {
     let r = boundsRadius;
-    if (occSelected >= 0 && occNodes[occSelected].parent >= 0 && (occView !== 'all' || occPmiOnlySelected)) {
+    if (occSelected >= 0 && occNodes[occSelected].parent >= 0 && occView !== 'all' /* v558 */) {
       const b = occBoxes[occSelected];
       if (b && b.length >= 6) r = Math.hypot(b[3] - b[0], b[4] - b[1], b[5] - b[2]) / 2 || r;
     }
     return Math.max(0, r) * OCC_PLANE_DEADBAND_RATIO;
   }
   function pmiOcclusionCenter() {
-    if (occSelected >= 0 && occNodes[occSelected].parent >= 0 && (occView !== 'all' || occPmiOnlySelected)) {
+    if (occSelected >= 0 && occNodes[occSelected].parent >= 0 && occView !== 'all' /* v558 */) {
       return occCenter(occSelected) || boundsCenter;
     }
     return boundsCenter;
