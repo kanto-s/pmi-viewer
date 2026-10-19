@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v551</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v552</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1314,6 +1314,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v552: 照合番号(バルーン)を、指している配管から遠すぎる位置に置かないようにしました(指示線の長さを最大約110pxまでにします)。</li>
         <li>v551: 照合番号の指示線が、ほかの番号の細い管の上を通り過ぎることがあった問題を修正しました(細い管も見落とさないよう、約2pxおきに調べます)。番号を見間違えないよう、指示線は指している部品以外のモデルの上を通しません。</li>
         <li>v550: 照合番号(バルーン)を、寸法で囲まれた範囲(2本の寸法補助線と寸法線の間)の中に置かないようにしました。</li>
         <li>v549: 照合番号(バルーン)や寸法値の文字がモデルの上に重なって表示されないようにしました。番号はモデルに重ならない位置へずらし、寸法値は寸法線とのすき間を変えずに寸法線に沿って(寸法補助線の間で)モデルに重ならない位置へずらします。</li>
@@ -18928,7 +18929,7 @@ pmi._lineFarPoint = null;
       if (k) { modelCx = sx / k; modelCy = sy / k; } }
     if (!(mbx1 > mbx0)) { mbx0 = 0; mbx1 = cw; mby0 = 0; mby1 = ch; }
     const cellW = (mbx1 - mbx0) / 6, cellH = (mby1 - mby0) / 5;
-    const BALLOON_NEAR_PX = Math.max(70, Math.min(170, Math.max(cellW, cellH) * 1.3)); // 区画1つ分ほど
+    const BALLOON_NEAR_PX = Math.max(70, Math.min(NOTE_MAX_LEADER_PX, Math.max(cellW, cellH) * 1.3)); // 区画1つ分ほど(v552: 上限を170→NOTE_MAX_LEADER_PX)
     // 番号の中心がモデルの範囲(区画の半分の余白付き)の外に出た分だけ減点する
     const outsideBoxPenalty = (P) => {
       const ex = Math.max(0, mbx0 - cellW * 0.5 - P.x, P.x - (mbx1 + cellW * 0.5));
@@ -19575,6 +19576,7 @@ pmi._lineFarPoint = null;
   // 通らず、ほかの番号・溶接記号・指示線とも重ならないようにする。指示線が寸法補助線を横切る
   // ことは、番号の文字が線に重なるよりはましなので、少ない方を選ぶだけにする。
   // 回転中は置き場所を変えない(v531)ので、ここも回転を止めたときだけ行う。
+  const NOTE_MAX_LEADER_PX = 110;     // v552: 照合番号の指示線の長さの上限(番号の丸の縁から指している点まで)。指している配管から遠くに置かない
   const NOTE_DIM_CLEAR_PX = 5;          // 番号の丸と寸法線・寸法補助線とのすき間
   const NOTE_DIM_FINAL_BUDGET_MS = 10;  // 1コマあたりの時間の上限
   // v544: 寸法1つ分の、画面上の線(寸法線・寸法補助線)と寸法値の範囲
@@ -19726,6 +19728,7 @@ pmi._lineFarPoint = null;
         if (r.x0 < 4 || r.y0 < Math.max(4, ribbonBottom + 4) || r.x1 > cw - 4 || r.y1 > ch - 4) return false;
         if (banned.some((b) => ov(r, b, 0))) return false;
         if (Math.hypot(s.P.x - O.x, s.P.y - O.y) < rad + 4) return false;
+        if (Math.hypot(s.K.x - O.x, s.K.y - O.y) > NOTE_MAX_LEADER_PX) return false; // v552: 遠すぎる位置には置かない
         for (const o of oth) {
           if (ov(r, o.r, 4)) return false;
           if (segTouchesRect(s.K, O, o.r, 2)) return false;
@@ -19766,7 +19769,7 @@ pmi._lineFarPoint = null;
       if (!best) {
         for (let k = 0; k < 24; k++) {
           const a = k * Math.PI / 12;
-          for (let D = rad + 8; D <= rad + 260; D += 8) consider({ x: O.x + Math.cos(a) * D, y: O.y + Math.sin(a) * D });
+          for (let D = rad + 8; D <= rad + NOTE_MAX_LEADER_PX; D += 6) consider({ x: O.x + Math.cos(a) * D, y: O.y + Math.sin(a) * D });
         }
       }
       if (!best) {
