@@ -1166,7 +1166,11 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v541</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v542</div>
+  <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
+       X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
+  <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
+       style="position:fixed; left:6px; bottom:22px; z-index:60; pointer-events:none; user-select:none; overflow:visible;"></svg>
   <!-- v338: 寸法値の位置決めロジック(render()内)が実際に毎フレーム
        計算している値を、画面上でそのまま確認できる簡易デバッグ表示。
        選択中のPMIが寸法のときだけ表示される。開発者ツールを開かなくても
@@ -1310,6 +1314,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v542: 画面左下に、X(赤)・Y(緑)・Z(青)の座標軸の向きを表示するようにしました(モデルと一緒に回り、いまどちらを向いているかが分かる)。</li>
         <li>v541: 溶接記号が指している継ぎ目を、モデルの陰になる部分も含めて全周明るく描くようにしました(陰の部分は少し細く透かして描く)。</li>
         <li>v540: 溶接記号が指している継ぎ目の強調を、縁取りや矢の先の輪をやめて、継ぎ目の線そのものを明るい白い線で描く形にしました。</li>
         <li>v539: 溶接記号が指している継ぎ目を、配管の色と見分けやすいマゼンタの太い線(暗い縁取り付き)で強調するようにしました。矢の先にも同じ色の輪を付け、矢と継ぎ目の対応を分かりやすくしました。選んだ溶接記号は、さらに太く強調します。</li>
@@ -10236,6 +10241,44 @@
   //  ・ズーム・パン・回転のたびに、モデルの外形が見えている範囲(リボン・部品表・
   //    選択パネルを除いた範囲)から外れすぎていないかを確かめ、外れていれば
   //    一部が見える位置まで戻す。
+  // v542: 画面左下の座標軸表示(X赤・Y緑・Z青)を、いまのモデルの向きに合わせて描き直す。
+  // mv: ビュー×ワールド行列(回転と一様な拡大だけなので、各列が各軸の画面上の向きになる)
+  let axisTriadKey = '';
+  function updateAxisTriad(mv) {
+    const el = document.getElementById('axisTriad');
+    if (!el) return;
+    const AX = [['X', '#FF5A5F', 0], ['Y', '#3DDC6A', 1], ['Z', '#4D8DFF', 2]];
+    const items = AX.map(([n, col, i]) => {
+      const x = mv[i * 4], y = mv[i * 4 + 1], z = mv[i * 4 + 2];
+      const L = Math.hypot(x, y, z) || 1;
+      return { n, col, x: x / L, y: -y / L, z: z / L }; // 画面は下向きが+なのでyを反転。zは手前が+
+    });
+    const key = items.map((t) => t.x.toFixed(3) + ',' + t.y.toFixed(3) + ',' + t.z.toFixed(3)).join('|');
+    if (key === axisTriadKey) return;
+    axisTriadKey = key;
+    const R = 30;
+    // 奥を向いている軸から先に描く(手前の軸が上に重なるように)
+    items.sort((a, b) => a.z - b.z);
+    let h = '<circle cx="0" cy="0" r="34" fill="rgba(10,18,24,0.35)" />';
+    for (const t of items) {
+      const ex = t.x * R, ey = t.y * R, len = Math.hypot(ex, ey);
+      const op = t.z < -0.2 ? 0.55 : 1; // 奥を向いている軸は少し薄く
+      h += '<g opacity="' + op + '">';
+      h += '<line x1="0" y1="0" x2="' + ex.toFixed(1) + '" y2="' + ey.toFixed(1) + '" stroke="' + t.col + '" stroke-width="3" stroke-linecap="round" />';
+      if (len > 4) {
+        const ux = ex / len, uy = ey / len, hl = 8, hw = 4.5;
+        const bx = ex - ux * hl, by = ey - uy * hl;
+        h += '<polygon points="' + ex.toFixed(1) + ',' + ey.toFixed(1) + ' ' + (bx - uy * hw).toFixed(1) + ',' + (by + ux * hw).toFixed(1) + ' ' +
+          (bx + uy * hw).toFixed(1) + ',' + (by - ux * hw).toFixed(1) + '" fill="' + t.col + '" />';
+      }
+      // 軸の名前(軸の先の少し外側。真っ直ぐこちら/奥を向いているときは軸の位置の近くに)
+      const lx = len > 4 ? ex / len * (len + 9) : 9, ly = len > 4 ? ey / len * (len + 9) : -9;
+      h += '<text x="' + lx.toFixed(1) + '" y="' + ly.toFixed(1) + '" fill="' + t.col + '" font-size="13" font-weight="700" font-family="sans-serif" text-anchor="middle" dominant-baseline="central" stroke="rgba(0,0,0,0.6)" stroke-width="2.5" paint-order="stroke">' + t.n + '</text>';
+      h += '</g>';
+    }
+    h += '<circle cx="0" cy="0" r="3.5" fill="#D8DEE6" />';
+    el.innerHTML = h;
+  }
   function currentMvp() {
     const aspect = canvas.width / Math.max(canvas.height, 1);
     const proj = mat4Ortho(ORTHO_HALF_HEIGHT, aspect, NEAR, FAR);
@@ -20829,6 +20872,7 @@ pmi._lineFarPoint = null;
       const vp = mat4Multiply(projMatrix, VIEW_MATRIX);
       const mvp = mat4Multiply(vp, worldMatrix);
       lastMVP = mvp; // ドラッグ位置調整(computeDragBasis)が使う最新のカメラ変換
+      try { updateAxisTriad(mat4Multiply(VIEW_MATRIX, worldMatrix)); } catch (e) { /* 表示できなくても描画は続ける */ }
 
       gl.useProgram(lineProgram);
       if (uLineAlphaLoc) gl.uniform1f(uLineAlphaLoc, 1);
