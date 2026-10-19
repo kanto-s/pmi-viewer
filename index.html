@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v563</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v564</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1314,6 +1314,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v564: 照合番号(バルーン)を寸法と重ならない位置に近くで置けないとき、遠くに斜めの長い指示線で置かれることがあった問題を修正しました。指している点から真横に引き出して置き、重なってしまう寸法はその角度だけ表示しません(B案と同じ扱い)。</li>
         <li>v563: 溶接記号のすみ肉の三角形などを、どの記号でも基線にぴったり付け、折れ点(○・旗)から同じ間隔の位置にそろえて描くようにしました。</li>
         <li>v563: 寸法の矢印が2本の線(開いた矢印)で記録されているファイルで、寸法線・寸法補助線が消えて寸法値だけが小さく残っていた問題を修正しました(40A 薬液供給管 3-3 の「711」「408」など)。</li>
         <li>v562: 一部の溶接記号で、すみ肉の三角形が基線からわずかに浮いて描かれ、三角形の上辺と基線が二重に見えていた(記号が壊れて見えた)問題を修正しました。基線に接するはずの記号は基線の上にぴったり乗せて描きます。</li>
@@ -19899,7 +19900,7 @@ pmi._lineFarPoint = null;
       }
       const oth = [];
       for (const q of peers) { if (q === w) continue; const s = shapeOf(q); if (s) oth.push(s); }
-      const okAt = (s) => {
+      const okAt = (s, allowDim) => {
         const r = s.r;
         if (r.x0 < 4 || r.y0 < Math.max(4, ribbonBottom + 4) || r.x1 > cw - 4 || r.y1 > ch - 4) return false;
         if (banned.some((b) => ov(r, b, 0))) return false;
@@ -19911,7 +19912,7 @@ pmi._lineFarPoint = null;
           if (o.L && segTouchesRect(o.L[0], o.L[1], r, 2)) return false;
           if (o.L && segCrossesSeg(s.K, O, o.L[0], o.L[1])) return false;
         }
-        if (dimHits(s) > 0) return false;
+        if (!allowDim && dimHits(s) > 0) return false;
         if (rectOnModel(r) || rectOnModelFine(r)) return false;
         if (noteLeaderOtherFrac(cover, s.K, O, w) > 0) return false;
         return true;
@@ -19949,10 +19950,32 @@ pmi._lineFarPoint = null;
           for (let D = rad + 8; D <= rad + NOTE_MAX_LEADER_PX; D += 6) consider({ x: O.x + Math.cos(a) * D, y: O.y + Math.sin(a) * D });
         }
       }
-      if (!best) {
-        if (curDim === 0) continue; // v549: モデルとの重なりだけのときは寸法は消さない
+      // v564: 寸法と重ならない置き場所が近く(指示線50px以内)に無いときは、以前は遠くへずらした位置
+      // (斜めの長い指示線)のまま残ることがあった。ユーザー指示「横に引っ張って指示したい」に合わせ、
+      // 指している点から真横(左右、傾きは15°まで)に、モデル・ほかの部品・ほかの番号と重ならない位置へ置き、
+      // 重なってしまう寸法の方をこの角度だけ表示しない(v544のB案と同じ扱い)。
+      let hideFrom = null;
+      if (!best && /^\d+$/.test(String(w._bomNum != null ? w._bomNum : ''))) {
+        let fb = null;
+        const D0 = rad + BALLOON_RULE_LEADER_PX;
+        for (const base of [0, 180]) for (const t of [0, 5, -5, 10, -10, 15, -15]) {
+          const a = (base + t) * Math.PI / 180, ux = Math.cos(a), uy = Math.sin(a);
+          for (let D = rad + 6; D <= rad + NOTE_MAX_LEADER_PX; D += 4) {
+            const sh = shapeAt({ x: O.x + ux * D, y: O.y + uy * D });
+            if (!okAt(sh, true)) continue;
+            let c = Math.abs(t) * 30 + Math.abs(D - D0) * 2 + dimHits(sh) * 8 + (w._ruleSide === base ? -20 : 0);
+            const pr = w._dimFixRel;
+            if (pr && Math.hypot(sh.P.x - O.x - pr.x, sh.P.y - O.y - pr.y) < 6) c -= 40;
+            if (!fb || c < fb.c) fb = { s: sh, c };
+          }
+        }
+        if (fb) { best = fb; hideFrom = fb.s; }
+      }
+      if (!best || hideFrom) {
+        if (!hideFrom && curDim === 0) continue; // v549: モデルとの重なりだけのときは寸法は消さない
         // v544: ずらしても重ならない置き場所が無いときは、この角度だけ、重なっている寸法の方を
-        // (寸法線・寸法補助線・寸法値をまとめて)表示しない。番号は今の位置のまま。
+        // (寸法線・寸法補助線・寸法値をまとめて)表示しない。番号は今の位置のまま(v564: 真横に置いたときはその位置)。
+        const hs = hideFrom || cur;
         const vk = noteViewKey();
         for (const q of allScreenPmis) {
           if (q.category !== 'dimension' || q._dimWholeHidden || q._dimThinHidden || q.id === selectedId || q._dimNoteHide) continue;
@@ -19960,12 +19983,12 @@ pmi._lineFarPoint = null;
           if (!el || el.style.display === 'none') continue;
           const sh = dimNoteShapes(q, mvp);
           if (q._dimFinalRect) { const r = dimRectForNoteLayout(q, q._dimFinalRect); sh.rect = { x0: r.left - cr.left, x1: r.right - cr.left, y0: r.top - cr.top, y1: r.bottom - cr.top }; }
-          if (noteHitsDimShapes(cur.r, cur.K, O, sh, NOTE_DIM_CLEAR_PX)) {
+          if (noteHitsDimShapes(hs.r, hs.K, O, sh, NOTE_DIM_CLEAR_PX)) {
             q._dimNoteHide = { note: w.id, vk };
             markRenderActive(300); declutterSettleUntil = Math.max(declutterSettleUntil, performance.now() + 300);
           }
         }
-        continue;
+        if (!hideFrom) continue;
       }
       const P = best.s.P;
       w._screen.x = P.x - g.offX;
