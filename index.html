@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v565</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v566</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1314,6 +1314,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v566: 照合番号(バルーン)に寸法補助線が重なって残る問題を、さらに修正しました。置き場所が決まった後も毎コマ重なりを確かめ、重なっている寸法はマウスを近づけなくてもすぐ隠します。</li>
         <li>v565: 回転を止めた直後に、照合番号(バルーン)に寸法補助線が一時的に重なって残り、マウスを近づけるまで直らないことがあった問題を修正しました。表示される寸法が変わったら、すぐに置き場所を確かめ直します。</li>
         <li>v564: 照合番号(バルーン)を寸法と重ならない位置に近くで置けないとき、遠くに斜めの長い指示線で置かれることがあった問題を修正しました。指している点から真横に引き出して置き、重なってしまう寸法はその角度だけ表示しません(B案と同じ扱い)。</li>
         <li>v563: 溶接記号のすみ肉の三角形などを、どの記号でも基線にぴったり付け、折れ点(○・旗)から同じ間隔の位置にそろえて描くようにしました。</li>
@@ -19785,6 +19786,43 @@ pmi._lineFarPoint = null;
     const r = sceneRotation, t = sceneTranslation;
     return [r.x, r.y, r.z, r.w].map((v) => v.toFixed(3)).join(',') + '|' + sceneScale.toFixed(3) + '|' + t.x.toFixed(2) + ',' + t.y.toFixed(2);
   }
+  // v566: 表示中の照合番号(注記)と重なっている寸法を、その角度だけ隠す(位置は動かさない)
+  function noteDimOverlapSweep(allScreenPmis, mvp) {
+    if (showAllAtOnce || isUserViewMoving(performance.now())) return;
+    const cr = cvRect();
+    const vk = noteViewKey();
+    const dims = allScreenPmis.filter((q) => q.category === 'dimension' && !q._dimWholeHidden && !q._dimThinHidden && !q._dimNoteHide && q.id !== selectedId);
+    if (!dims.length) return;
+    const shapes = new Map();
+    for (const n of allScreenPmis) {
+      if (n.category !== 'note' || n.asRecorded || !n._screen || n._noModelLeader || n._markerOccluded || n._farOccluded) continue;
+      const el = markerEls.get(n.id);
+      if (!el || el.style.display === 'none' || el.style.opacity === '0') continue;
+      const oL = leaderModelPoint(n);
+      const O = oL ? project(mvp, oL) : null;
+      const g = measureTagCenterOffset(n);
+      if (!O || !g || !(g.w > 0)) continue;
+      const C = { x: n._screen.x + g.offX, y: n._screen.y + g.offY };
+      const nr = { x0: C.x - g.w / 2, x1: C.x + g.w / 2, y0: C.y - g.h / 2, y1: C.y + g.h / 2 };
+      const dx = O.x - C.x, dy = O.y - C.y, d = Math.hypot(dx, dy) || 1, rr = Math.max(g.w, g.h) / 2;
+      const K = { x: C.x + dx / d * Math.min(rr, d), y: C.y + dy / d * Math.min(rr, d) };
+      for (const q of dims) {
+        if (q._dimNoteHide) continue;
+        const qel = markerEls.get(q.id);
+        if (!qel || qel.style.display === 'none') continue;
+        let sh = shapes.get(q);
+        if (!sh) {
+          sh = dimNoteShapes(q, mvp);
+          if (q._dimFinalRect) { const r = dimRectForNoteLayout(q, q._dimFinalRect); if (r) sh.rect = { x0: r.left - cr.left, x1: r.right - cr.left, y0: r.top - cr.top, y1: r.bottom - cr.top }; }
+          shapes.set(q, sh);
+        }
+        if (noteHitsDimShapes(nr, K, O, sh, NOTE_DIM_CLEAR_PX)) {
+          q._dimNoteHide = { note: n.id, vk };
+          markRenderActive(300);
+        }
+      }
+    }
+  }
   function noteFinalDimCheck(allScreenPmis, mvp) {
     if (isUserViewMoving(performance.now())) return;
     // v544: 注記と重なるために隠した寸法を、視点が変わって重ならなくなったら元に戻す。
@@ -22458,6 +22496,9 @@ pmi._lineFarPoint = null;
           el.style.left = pmi._screen.x + 'px';
           el.style.top = pmi._screen.y + 'px';
         }
+        // v566: 置き場所が決まった後(計算を省いているコマ)でも、照合番号に寸法の線・寸法値が重なって
+        // いれば、マウスを近づけなくてもその寸法をすぐ隠す(B案)。
+        try { noteDimOverlapSweep(allScreenPmis, mvp); } catch (err) { /* 次のコマで */ }
       } else {
       // v181: ユーザーから「指示線の長さや角度を自動調整することで事故ら
       // ないようにしてほしい。最初から重ならないように、各指示線の角度・
