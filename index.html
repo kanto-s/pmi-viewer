@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v552</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v553</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1314,6 +1314,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v553: 溶接記号が指している継ぎ目のハイライトを見つけやすくしました。線を太くし、黄色など明るい配管の上では白の代わりに濃いピンクで描きます(青・緑など暗い配管の上は白のまま。縁取り・輪は付けません)。</li>
         <li>v552: 照合番号(バルーン)を、指している配管から遠すぎる位置に置かないようにしました(指示線の長さを最大約110pxまでにします)。</li>
         <li>v551: 照合番号の指示線が、ほかの番号の細い管の上を通り過ぎることがあった問題を修正しました(細い管も見落とさないよう、約2pxおきに調べます)。番号を見間違えないよう、指示線は指している部品以外のモデルの上を通しません。</li>
         <li>v550: 照合番号(バルーン)を、寸法で囲まれた範囲(2本の寸法補助線と寸法線の間)の中に置かないようにしました。</li>
@@ -8753,6 +8754,7 @@
   // v539: 溶接記号が指している継ぎ目の強調色(配管の色と重ならないマゼンタ)と、その縁取りの暗い色
   const WELD_SEAM_CSS = '#FFFFFF'; // v540: 縁取りや輪をやめ、継ぎ目の線そのものを明るく(白)描く
   const COLOR_WELD_SEAM = hexToRgb01(WELD_SEAM_CSS);
+  const COLOR_WELD_SEAM_ON_LIGHT = hexToRgb01('#FF1F8E'); // v553: 黄色など明るい配管の上で使う継ぎ目の色
   const COLOR_WELD_SEAM_HALO = hexToRgb01('#15171C');
   const COLOR_BBOX = hexToRgb01('#3C5850');
   const COLOR_MODEL = hexToRgb01('#2E6FD9');
@@ -21412,7 +21414,28 @@ pmi._lineFarPoint = null;
           const px = 2 / Math.max(1, canvas.width), py = 2 / Math.max(1, canvas.height);
           const dpr = window.devicePixelRatio || 1;
           const disc = (r) => { const o = []; const R = Math.ceil(r); for (let dx = -R; dx <= R; dx++) for (let dy = -R; dy <= R; dy++) if (dx * dx + dy * dy <= r * r + 0.01) o.push([dx, dy]); return o; };
-          const HALO_N = disc(3.2), CORE_N = disc(1.5), HALO_S = disc(4.2), CORE_S = disc(2.3), HIDDEN_N = disc(1.0);
+          // v553: 継ぎ目の線を太く(手前: 約5px、選んだもの: 約7px、陰: 約3px)して見つけやすくする
+          const HALO_N = disc(3.2), CORE_N = disc(2.4), HALO_S = disc(4.2), CORE_S = disc(3.4), HIDDEN_N = disc(1.4);
+          // v553: 白い線は黄色など明るい配管の上では見分けにくかった。指している点の配管の色を画面から読み取り、
+          // 明るい配管の上では濃いピンク、暗い配管(青・緑など)の上では白で描く(縁取り・輪は付けない)。
+          const mvpSeam = currentMvp();
+          const seamColorFor = (w) => {
+            try {
+              const O = project(mvpSeam, w._modelAttachmentPoint);
+              if (!O) return COLOR_WELD_SEAM;
+              const dprR = window.devicePixelRatio || 1;
+              const x = Math.round(O.x * canvas.width / Math.max(1, cvSize().w)), y = Math.round(canvas.height - O.y * canvas.height / Math.max(1, cvSize().h));
+              if (x < 1 || y < 1 || x >= canvas.width - 1 || y >= canvas.height - 1) return w._seamColor || COLOR_WELD_SEAM;
+              const buf = new Uint8Array(4 * 9);
+              gl.readPixels(x - 1, y - 1, 3, 3, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+              let lum = 0;
+              for (let k = 0; k < 9; k++) lum += (0.2126 * buf[k * 4] + 0.7152 * buf[k * 4 + 1] + 0.0722 * buf[k * 4 + 2]) / 255;
+              lum /= 9;
+              void dprR;
+              w._seamColor = lum > 0.45 ? COLOR_WELD_SEAM_ON_LIGHT : COLOR_WELD_SEAM;
+              return w._seamColor;
+            } catch (e) { return w._seamColor || COLOR_WELD_SEAM; }
+          };
           const drawOff = (line, offs, color) => {
             for (const [sx, sy] of offs) { gl.uniform2f(uNdcShiftLoc, sx * px * dpr, sy * py * dpr); drawLines(line, color); }
           };
@@ -21430,7 +21453,8 @@ pmi._lineFarPoint = null;
             }
             const sel = w.id === selectedId;
             // v540: 暗い縁取りはやめ、明るい線だけを描く(選んだ溶接記号は少し太く)
-            drawOff(w._weldJointLine, sel ? CORE_S : CORE_N, COLOR_WELD_SEAM);
+            const seamCol = seamColorFor(w);
+            drawOff(w._weldJointLine, sel ? CORE_S : CORE_N, seamCol);
             gl.uniform2f(uNdcShiftLoc, 0, 0);
             // v541: モデルの陰になっている部分も含めて、継ぎ目を全周明るく描く(すべての溶接記号)。
             // 陰の部分は、手前の部分と区別できるよう少し細く・少し透かして描く。
@@ -21439,7 +21463,7 @@ pmi._lineFarPoint = null;
             gl.enable(gl.BLEND);
             gl.blendColor(0, 0, 0, 0.8);
             gl.blendFunc(gl.CONSTANT_ALPHA, gl.ONE_MINUS_CONSTANT_ALPHA);
-            drawOff(w._weldJointLine, sel ? CORE_N : HIDDEN_N, COLOR_WELD_SEAM);
+            drawOff(w._weldJointLine, sel ? CORE_N : HIDDEN_N, seamCol);
             gl.uniform2f(uNdcShiftLoc, 0, 0);
             gl.disable(gl.BLEND);
             gl.depthMask(true);
