@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v555</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v556</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1314,6 +1314,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v556: 「PMIを一斉表示」のときに動きが重くなる問題を軽くしました。回転中は、表示し続けている照合番号・溶接記号の置き場所探しを省き(回転中は置き場所を変えないため)、寸法の線との重なりの判定も近くの線だけを調べるようにしました(結果は同じ)。</li>
         <li>v555: 照合番号(バルーン)をもっと指している配管の近くに置くようにしました(指示線の目安の長さ 約28px、上限 約50px)。</li>
         <li>v554: 照合番号(バルーン)が指している配管から遠く離れて置かれることがあった問題を修正しました。指示線の長さを最大約80pxまでにし、遠すぎるときは近くへ置き直します(寸法で囲まれた範囲を避けることより、配管に近いことを優先します)。</li>
         <li>v553: 溶接記号が指している継ぎ目のハイライトを見つけやすくしました。線を太くし、黄色など明るい配管の上では白の代わりに濃いピンクで描きます(青・緑など暗い配管の上は白のまま。縁取り・輪は付けません)。</li>
@@ -18774,6 +18775,34 @@ pmi._lineFarPoint = null;
     for (const A of areas) for (const q of pts) if (pointInPoly(q, A)) return true;
     return false;
   }
+  // v556: 寸法の線分を画面の升目に振り分け、調べる範囲にかかる線分だけを取り出す(PMIの一斉表示で
+  // 寸法の線が数百本になると、照合番号の置き場所探しで全線分との総当たりが重かったため)。結果は同じ。
+  function makeSegGrid(segs, cell) {
+    const C = cell || 48, map = new Map();
+    segs.forEach((sg, i) => {
+      const a = sg[0], b = sg[1];
+      const gx0 = Math.floor(Math.min(a.x, b.x) / C), gx1 = Math.floor(Math.max(a.x, b.x) / C);
+      const gy0 = Math.floor(Math.min(a.y, b.y) / C), gy1 = Math.floor(Math.max(a.y, b.y) / C);
+      if ((gx1 - gx0 + 1) * (gy1 - gy0 + 1) > 400) { (map.get('big') || map.set('big', []).get('big')).push(i); return; }
+      for (let gx = gx0; gx <= gx1; gx++) for (let gy = gy0; gy <= gy1; gy++) {
+        const k = gx * 100003 + gy; let arr = map.get(k); if (!arr) { arr = []; map.set(k, arr); } arr.push(i);
+      }
+    });
+    let stamp = 0; const seen = new Int32Array(segs.length);
+    return (x0, y0, x1, y1) => {
+      stamp++;
+      const out = [];
+      const big = map.get('big'); if (big) for (const i of big) { seen[i] = stamp; out.push(segs[i]); }
+      const gx0 = Math.floor(Math.min(x0, x1) / C), gx1 = Math.floor(Math.max(x0, x1) / C);
+      const gy0 = Math.floor(Math.min(y0, y1) / C), gy1 = Math.floor(Math.max(y0, y1) / C);
+      if ((gx1 - gx0 + 1) * (gy1 - gy0 + 1) > 2500) return segs.slice();
+      for (let gx = gx0; gx <= gx1; gx++) for (let gy = gy0; gy <= gy1; gy++) {
+        const arr = map.get(gx * 100003 + gy); if (!arr) continue;
+        for (const i of arr) if (seen[i] !== stamp) { seen[i] = stamp; out.push(segs[i]); }
+      }
+      return out;
+    };
+  }
   function segCrossesSeg(a, b, c, d) {
     const d1x = b.x - a.x, d1y = b.y - a.y, d2x = d.x - c.x, d2y = d.y - c.y;
     const den = d1x * d2y - d1y * d2x;
@@ -18802,15 +18831,21 @@ pmi._lineFarPoint = null;
   function resolveWeldLeaderCrossings(allScreenPmis, mvp) {
     const cover = getScreenCover(mvp);
     if (!cover) return;
+    // v556: 回転中は、前のコマから続けて表示している照合番号・溶接記号の置き場所を変えない(v531)ので、
+    // それらの置き場所探し(重い計算)は省く。回転中に新しく出てきたものだけ置き場所を決める。
+    const movingNow = isUserViewMoving(performance.now());
+    const frozen = (p) => movingNow && p._smPolar && (p._smSeq === pmiSmoothLayoutSeq) && performance.now() - (p._smPolar.t || 0) <= 300;
     const welds = allScreenPmis.filter((p) => !p.asRecorded && p._screen && !p._noModelLeader &&
-      ((p.category === 'weld' && p._modelAttachmentPoint) || (p.category === 'note' && leaderModelPoint(p))));
+      ((p.category === 'weld' && p._modelAttachmentPoint) || (p.category === 'note' && leaderModelPoint(p))) && !frozen(p));
     if (!welds.length) return;
     const dimSegs = collectDimScreenSegs(allScreenPmis, mvp);
     let dimAreas = []; try { dimAreas = collectDimScreenAreas(mvp); } catch (e) { dimAreas = []; } // v550
     const DIM_CLEAR_PX = 7; // v523: 5→7(番号の丸と寸法補助線のすき間を少し広く)
-    const rectHitsDim = (r) => { for (const [a, b] of dimSegs) if (segTouchesRect(a, b, r, DIM_CLEAR_PX)) return true; return false; };
-    const rectDimCount = (r) => { let n = 0; for (const [a, b] of dimSegs) if (segTouchesRect(a, b, r, DIM_CLEAR_PX)) n++; return n; }; // v523
-    const leaderDimCrosses = (a, b) => { let n = 0; for (const [c, d] of dimSegs) if (segCrossesSeg(a, b, c, d)) n++; return n; };
+    const dimQ = makeSegGrid(dimSegs); // v556
+    const nearDim = (r, m) => dimQ(r.x0 - m - 1, r.y0 - m - 1, r.x1 + m + 1, r.y1 + m + 1);
+    const rectHitsDim = (r) => { for (const [a, b] of nearDim(r, DIM_CLEAR_PX)) if (segTouchesRect(a, b, r, DIM_CLEAR_PX)) return true; return false; };
+    const rectDimCount = (r) => { let n = 0; for (const [a, b] of nearDim(r, DIM_CLEAR_PX)) if (segTouchesRect(a, b, r, DIM_CLEAR_PX)) n++; return n; }; // v523
+    const leaderDimCrosses = (a, b) => { let n = 0; for (const [c, d] of dimQ(a.x - 1, a.y - 1, b.x + 1, b.y + 1)) if (segCrossesSeg(a, b, c, d)) n++; return n; };
     // 指示線が寸法補助線・寸法線に沿って重なる(ほぼ平行で近い)割合。交差の本数では数えられない
     // 「寸法補助線とかぶる」状態を見つける。モデル側の端(tip)の手前10pxは数えない。
     const leaderDimNear = (from, tip) => {
@@ -18824,7 +18859,7 @@ pmi._lineFarPoint = null;
       const lx0 = Math.min(from.x, from.x + dx * ux) - 3.5, lx1 = Math.max(from.x, from.x + dx * ux) + 3.5;
       const ly0 = Math.min(from.y, from.y + dy * ux) - 3.5, ly1 = Math.max(from.y, from.y + dy * ux) + 3.5;
       const segsNear = [];
-      for (const sg of dimSegs) {
+      for (const sg of dimQ(lx0, ly0, lx1, ly1)) { // v556
         const c = sg[0], d = sg[1];
         if (Math.max(c.x, d.x) < lx0 || Math.min(c.x, d.x) > lx1 || Math.max(c.y, d.y) < ly0 || Math.min(c.y, d.y) > ly1) continue;
         segsNear.push(sg);
@@ -19482,9 +19517,12 @@ pmi._lineFarPoint = null;
         // どの向きにも置けないときは、これまでどおり周りから探す
       }
       const L0 = 60; // v501: 置き場所の候補はモデル側の点の近く(約35〜140px)から選ぶ
-      for (let k = 0; k < 36; k++) { // v504: 10°おきの36方向
-        const a = k * Math.PI / 18, dx = Math.cos(a), dy = Math.sin(a);
-        for (const mul of [0.35, 0.55, 0.8, 1.1, 1.45, 1.85, 2.3]) {
+      // v556: 一斉表示などで対象が多いときは、候補の方向・距離を間引く(20°おき・5段階)
+      const manyW = welds.length > 8;
+      const NDIR = manyW ? 18 : 36, MULS = manyW ? [0.35, 0.8, 1.1, 1.45, 2.3] : [0.35, 0.55, 0.8, 1.1, 1.45, 1.85, 2.3];
+      for (let k = 0; k < NDIR; k++) { // v504: 10°おきの36方向
+        const a = k * Math.PI * 2 / NDIR, dx = Math.cos(a), dy = Math.sin(a);
+        for (const mul of MULS) {
           const dist = L0 * mul + Math.abs(dx) * g.w / 2 + Math.abs(dy) * g.h / 2;
           const P = { x: O0.x + dx * dist, y: O0.y + dy * dist };
           const ev = evalAt(P);
@@ -19659,6 +19697,7 @@ pmi._lineFarPoint = null;
     }
     let dimAreasF = []; try { dimAreasF = collectDimScreenAreas(mvp); } catch (e) { dimAreasF = []; } // v550
     if (!dimSegs.length && !dimRects.length) return;
+    const dimQF = makeSegGrid(dimSegs); // v556
     const cover = getScreenCover(mvp);
     if (!cover) return;
     const t0 = performance.now();
@@ -19710,7 +19749,7 @@ pmi._lineFarPoint = null;
       // 寸法の線・文字との重なりの数
       const dimHits = (s) => {
         let n = 0;
-        for (const [a, b] of dimSegs) if (segTouchesRect(a, b, s.r, NOTE_DIM_CLEAR_PX)) n++;
+        for (const [a, b] of dimQF(s.r.x0 - NOTE_DIM_CLEAR_PX - 1, s.r.y0 - NOTE_DIM_CLEAR_PX - 1, s.r.x1 + NOTE_DIM_CLEAR_PX + 1, s.r.y1 + NOTE_DIM_CLEAR_PX + 1)) if (segTouchesRect(a, b, s.r, NOTE_DIM_CLEAR_PX)) n++;
         for (const d of dimRects) { if (ov(s.r, d, 3)) n++; if (segTouchesRect(s.K, O, d, 2)) n++; }
         return n;
       };
@@ -19748,7 +19787,7 @@ pmi._lineFarPoint = null;
       const costOf = (s) => {
         const len = Math.hypot(s.K.x - O.x, s.K.y - O.y);
         let c = Math.hypot(s.P.x - P0.x, s.P.y - P0.y);
-        let x = 0; for (const [a, b] of dimSegs) if (segCrossesSeg(s.K, O, a, b)) x++;
+        let x = 0; for (const [a, b] of dimQF(s.K.x - 1, s.K.y - 1, O.x + 1, O.y + 1)) if (segCrossesSeg(s.K, O, a, b)) x++;
         c += Math.min(6, x) * 25;
         c += Math.max(0, len - LEADER_HARD_PX) * 2;
         if (rectInDimArea(s.r, dimAreasF)) c += 80; // v554: 寸法で囲まれた範囲の中は、近くに外の場所があればそちらを選ぶ(遠くへ離してまでは避けない)
