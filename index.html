@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v554</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v555</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1314,6 +1314,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v555: 照合番号(バルーン)をもっと指している配管の近くに置くようにしました(指示線の目安の長さ 約28px、上限 約50px)。</li>
         <li>v554: 照合番号(バルーン)が指している配管から遠く離れて置かれることがあった問題を修正しました。指示線の長さを最大約80pxまでにし、遠すぎるときは近くへ置き直します(寸法で囲まれた範囲を避けることより、配管に近いことを優先します)。</li>
         <li>v553: 溶接記号が指している継ぎ目のハイライトを見つけやすくしました。線を太くし、黄色など明るい配管の上では白の代わりに濃いピンクで描きます(青・緑など暗い配管の上は白のまま。縁取り・輪は付けません)。</li>
         <li>v552: 照合番号(バルーン)を、指している配管から遠すぎる位置に置かないようにしました(指示線の長さを最大約110pxまでにします)。</li>
@@ -18659,7 +18660,7 @@ pmi._lineFarPoint = null;
   // v501: 照合番号・溶接記号の指示線の長さの目安(画面上のpx)。SOFTを超えると減点が増え、
   // HARDを超えるとさらに大きく減点する。HARDより長い指示線は、近くの置き場所へ移し直す対象にする。
   const LEADER_SOFT_PX = 80, LEADER_HARD_PX = 140;
-  const BALLOON_RULE_LEADER_PX = 55;
+  const BALLOON_RULE_LEADER_PX = 28; // v555: 55→28(もっと近くに)
   const JOINT_TIME_BUDGET_MS = 6;   // v508: 照合番号をまとめて決める計算の時間の上限(1回あたり)
   const JOINT_MAX_CANDS = 14;       // v508: 番号1つあたりの候補の数の上限 // v506: 照合番号の指示線の目安の長さ(丸の縁まで) // v505: 指示線の長さの上限を短く(v501: 110/190)
   const leaderLenPenalty = (len) => len * 0.3 + Math.max(0, len - LEADER_SOFT_PX) * 6 + Math.max(0, len - LEADER_HARD_PX) * 12;
@@ -18932,7 +18933,7 @@ pmi._lineFarPoint = null;
       if (k) { modelCx = sx / k; modelCy = sy / k; } }
     if (!(mbx1 > mbx0)) { mbx0 = 0; mbx1 = cw; mby0 = 0; mby1 = ch; }
     const cellW = (mbx1 - mbx0) / 6, cellH = (mby1 - mby0) / 5;
-    const BALLOON_NEAR_PX = Math.max(70, Math.min(NOTE_MAX_LEADER_PX, Math.max(cellW, cellH) * 1.3)); // 区画1つ分ほど(v552: 上限を170→NOTE_MAX_LEADER_PX)
+    const BALLOON_NEAR_PX = Math.max(NOTE_MAX_LEADER_PX, Math.min(NOTE_MAX_LEADER_PX, Math.max(cellW, cellH) * 1.3)); // 区画1つ分ほど(v552: 上限を170→NOTE_MAX_LEADER_PX)
     // 番号の中心がモデルの範囲(区画の半分の余白付き)の外に出た分だけ減点する
     const outsideBoxPenalty = (P) => {
       const ex = Math.max(0, mbx0 - cellW * 0.5 - P.x, P.x - (mbx1 + cellW * 0.5));
@@ -19579,7 +19580,7 @@ pmi._lineFarPoint = null;
   // 通らず、ほかの番号・溶接記号・指示線とも重ならないようにする。指示線が寸法補助線を横切る
   // ことは、番号の文字が線に重なるよりはましなので、少ない方を選ぶだけにする。
   // 回転中は置き場所を変えない(v531)ので、ここも回転を止めたときだけ行う。
-  const NOTE_MAX_LEADER_PX = 80;     // v552: 照合番号の指示線の長さの上限(番号の丸の縁から指している点まで)。指している配管から遠くに置かない
+  const NOTE_MAX_LEADER_PX = 50;     // v552: 照合番号の指示線の長さの上限(番号の丸の縁から指している点まで)。指している配管から遠くに置かない
   const NOTE_DIM_CLEAR_PX = 5;          // 番号の丸と寸法線・寸法補助線とのすき間
   const NOTE_DIM_FINAL_BUDGET_MS = 10;  // 1コマあたりの時間の上限
   // v544: 寸法1つ分の、画面上の線(寸法線・寸法補助線)と寸法値の範囲
@@ -19751,7 +19752,7 @@ pmi._lineFarPoint = null;
         c += Math.min(6, x) * 25;
         c += Math.max(0, len - LEADER_HARD_PX) * 2;
         if (rectInDimArea(s.r, dimAreasF)) c += 80; // v554: 寸法で囲まれた範囲の中は、近くに外の場所があればそちらを選ぶ(遠くへ離してまでは避けない)
-        c += len * 0.6; // v554: 指している配管に近い方を優先
+        c += len * 1.5; // v554: 指している配管に近い方を優先(v555: 0.6→1.5)
         // 前のコマにずらした位置(指している点から見た位置)を優先して、止まっている間に揺れないようにする
         const pr = w._dimFixRel;
         if (pr && Math.hypot(s.P.x - O.x - pr.x, s.P.y - O.y - pr.y) < 6) c -= 40;
