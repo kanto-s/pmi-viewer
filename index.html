@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v562</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v563</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1314,6 +1314,8 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v563: 溶接記号のすみ肉の三角形などを、どの記号でも基線にぴったり付け、折れ点(○・旗)から同じ間隔の位置にそろえて描くようにしました。</li>
+        <li>v563: 寸法の矢印が2本の線(開いた矢印)で記録されているファイルで、寸法線・寸法補助線が消えて寸法値だけが小さく残っていた問題を修正しました(40A 薬液供給管 3-3 の「711」「408」など)。</li>
         <li>v562: 一部の溶接記号で、すみ肉の三角形が基線からわずかに浮いて描かれ、三角形の上辺と基線が二重に見えていた(記号が壊れて見えた)問題を修正しました。基線に接するはずの記号は基線の上にぴったり乗せて描きます。</li>
         <li>v561: 一部の溶接記号で、脚長などの数字(例「3」)が鏡文字(左右反転)で表示される問題を修正しました。ファイルによっては文字の表裏の向きが逆に記録されていたため、すみ肉などの記号の形(縦の線が左側)から読める向きを判定し直すようにしました。</li>
         <li>v560: フォルダで読み込んだときに、サブアセンブリを選んだ後は、何を押しても一部の照合番号(②など)しか出なくなっていた問題を修正しました。サブアセンブリを選んでいる間に照合番号の指示点を求め直すと、選んだ部分以外を指す番号が「モデルを指していない」と判定されていたため、指示点は常にモデル全体から求めます。</li>
@@ -10639,6 +10641,52 @@
     return mainLineSegmentsByLength(lines, DIMENSION_LEADER_JUNK_SEG_RATIO);
   }
 
+  // v563: 寸法の開いた矢印(先端の1点から2本の短い線が寸法線の内側へ斜めに伸びる形)を探し、
+  // 塗りつぶしの三角形(先端・2本の線の先)に置き換える。線は寸法線・寸法補助線だけを残す。
+  function convertOpenDimArrows(pmi) {
+    const L = pmi.lines;
+    if (L.length < 3) return;
+    const d3 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+    const len = (sg) => d3(sg[0], sg[1]);
+    const maxLen = L.reduce((m, sg) => Math.max(m, len(sg)), 0);
+    const eps = Math.max(1e-3, maxLen * 1e-4);
+    const tris = Array.isArray(pmi.tris) ? pmi.tris : [];
+    const used = new Set(), add = [];
+    for (let i = 0; i < L.length; i++) {
+      if (used.has(i)) continue;
+      for (let ei = 0; ei < 2; ei++) {
+        const P = L[i][ei], A = L[i][1 - ei];
+        let j = -1, B = null;
+        for (let k = i + 1; k < L.length && j < 0; k++) {
+          if (used.has(k)) continue;
+          for (let ek = 0; ek < 2; ek++) if (d3(L[k][ek], P) < eps) { j = k; B = L[k][1 - ek]; break; }
+        }
+        if (j < 0) continue;
+        const la = d3(P, A), lb = d3(P, B);
+        if (la < 1e-6 || lb < 1e-6 || Math.abs(la - lb) > Math.max(la, lb) * 0.15) continue;
+        // 寸法線: 先端Pを端点に持つ、矢印より長い線。矢印の2本は寸法線をはさんで対称に開く
+        let dimSeg = -1;
+        for (let k = 0; k < L.length; k++) {
+          if (k === i || k === j || used.has(k)) continue;
+          if ((d3(L[k][0], P) < eps || d3(L[k][1], P) < eps) && len(L[k]) > la * 1.2) { dimSeg = k; break; }
+        }
+        if (dimSeg < 0) continue;
+        const Q = d3(L[dimSeg][0], P) < eps ? L[dimSeg][1] : L[dimSeg][0];
+        const u = [Q[0] - P[0], Q[1] - P[1], Q[2] - P[2]], ul = Math.hypot(u[0], u[1], u[2]);
+        const ca = ((A[0] - P[0]) * u[0] + (A[1] - P[1]) * u[1] + (A[2] - P[2]) * u[2]) / (la * ul);
+        const cb = ((B[0] - P[0]) * u[0] + (B[1] - P[1]) * u[1] + (B[2] - P[2]) * u[2]) / (lb * ul);
+        if (Math.abs(ca) < 0.7 || Math.abs(cb) < 0.7 || Math.sign(ca) !== Math.sign(cb)) continue; // 開きが約45°以内
+        if (tris.some((t) => t.some((v) => d3(v, P) < la * 0.2))) continue; // 塗りつぶしの矢印がすでにある
+        used.add(i); used.add(j);
+        add.push([P.slice(), A.slice(), B.slice()]);
+        break;
+      }
+    }
+    if (!add.length) return;
+    pmi.lines = L.filter((_, k) => !used.has(k));
+    pmi.tris = tris.concat(add);
+  }
+
   function rebuildPmiLineBuffer(pmi) {
     deleteLineBuffer(pmi._lineData);
     if (pmi._counterboreHidden) {
@@ -12574,6 +12622,30 @@
     const isArr = (ln) => Array.isArray(ln);
     const ptsOfLine = (ln) => (isArr(ln) ? ln : ln.poly);
     const els = [];
+    // v563: すみ肉の三角形など、2本以上の線がつながってできた記号が基線からわずかに(基線長の12%以内)
+    // 離れていたら、一番近い点が基線にぴったり乗るよう上下に寄せる(どの溶接記号でも三角形を基線に付ける)。
+    // 仕上げ記号(1本の線・円弧)は基線から離して描くものなので対象にしない。
+    {
+      const arrLines = L.sym.filter(isArr);
+      const par = arrLines.map((_, i) => i);
+      const f = (i) => (par[i] === i ? i : (par[i] = f(par[i])));
+      const same = (x1, y1, x2, y2) => Math.abs(x1 - x2) < 0.01 && Math.abs(y1 - y2) < 0.01;
+      for (let i = 0; i < arrLines.length; i++) for (let j = i + 1; j < arrLines.length; j++) {
+        const a = arrLines[i], b = arrLines[j];
+        if (same(a[0], a[1], b[0], b[1]) || same(a[0], a[1], b[2], b[3]) || same(a[2], a[3], b[0], b[1]) || same(a[2], a[3], b[2], b[3])) par[f(i)] = f(j);
+      }
+      const groupsL = new Map();
+      arrLines.forEach((ln, i) => { const r = f(i); if (!groupsL.has(r)) groupsL.set(r, []); groupsL.get(r).push(i); });
+      const repl = new Map();
+      for (const idxs of groupsL.values()) {
+        if (idxs.length < 2) continue;
+        let nearY = Infinity;
+        for (const i of idxs) for (const y of [arrLines[i][1], arrLines[i][3]]) if (Math.abs(y) < Math.abs(nearY)) nearY = y;
+        if (!(Math.abs(nearY) > 1e-4 && Math.abs(nearY) < 0.12)) continue;
+        for (const i of idxs) { const a = arrLines[i]; repl.set(a, [a[0], a[1] - nearY, a[2], a[3] - nearY]); }
+      }
+      if (repl.size) L = Object.assign({}, L, { sym: L.sym.map((ln) => repl.get(ln) || ln) });
+    }
     // 線: 基線に接していれば基本記号、離れていれば仕上げ記号などの補助記号
     for (const ln of L.sym) {
       const a = ptsOfLine(ln);
@@ -12722,10 +12794,10 @@
     let umin = Infinity, umax = -Infinity;
     for (const e of els) { umin = Math.min(umin, e.b.minx * s, e.b.maxx * s); umax = Math.max(umax, e.b.minx * s, e.b.maxx * s); }
     const kg = Math.max(0.12, (ws.circle || 0) + gap), eg = 0.06;
-    let du = 0;
-    if (umin < kg) du = kg - umin;
-    else if (umax > 1 - eg) du = Math.max(kg - umin, 1 - eg - umax);
-    if (du) for (const e of els) move(e, (x) => x + du * s, (y) => y);
+    // v563: 記号と文字のかたまりは、どの溶接記号でも折れ点(○・旗)から同じ間隔の位置にそろえる
+    // (ファイルに記録された位置のままだと、三角形の位置が記号ごとにばらばらに見えたため)。
+    const du = kg - umin;
+    if (Math.abs(du) > 1e-6) for (const e of els) move(e, (x) => x + du * s, (y) => y);
     const len = Math.max(1, umax + du + eg);
     const tx = (len - 1) * s;
     const shiftLn = (ln) => (isArr(ln) ? [ln[0] + tx, ln[1], ln[2] + tx, ln[3]] : { poly: ln.poly.map((v, i) => (i % 2 === 0 ? v + tx : v)) });
@@ -15140,6 +15212,14 @@
     // 複製保存しておく。rebuildPmiGeometry()は毎回この複製を出発点にする
     // (enlargePmiGlyphTriangles等はpmi.tris/pmi.linesを直接書き換える破壊的
     // 処理のため、複製なしに繰り返し呼ぶと二重・三重に拡大されてしまう)。
+    // v563: 寸法の端末記号(矢印)が、塗りつぶしの三角形ではなく2本の線(開いた矢印)で記録されている
+    // ファイルがあった(40A 薬液供給管 3-3 の「711」「408」など)。矢印を見つけられないと寸法線・寸法補助線を
+    // 組み立てられず、寸法値だけが小さく残って線が消えていた。開いた矢印は、同じ形の塗りつぶし矢印に置き換える。
+    for (const pmi of pmiList) {
+      if (pmi.category !== 'dimension' || pmi._openArrowDone || !Array.isArray(pmi.lines)) continue;
+      pmi._openArrowDone = true;
+      try { convertOpenDimArrows(pmi); } catch (e) { console.error('開いた矢印の変換に失敗', e); }
+    }
     for (const pmi of pmiList) {
       if (keepView && pmi._nativeTris !== undefined) continue; // 既に元の形を保存済み(二重の拡大を防ぐ)
       pmi._nativeTris = (pmi.tris && pmi.tris.length) ? pmi.tris.map((tri) => tri.map((v) => v.slice())) : (pmi.tris || null);
