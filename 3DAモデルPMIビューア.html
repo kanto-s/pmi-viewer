@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v574</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v575</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1314,6 +1314,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v575: 現場溶接の旗のポールが下向きに読める溶接記号(記号を上下逆さまに読んでいたもの)を、正しい向きに読み直すようにしました。40A 薬液供給管 3-3 の詳細ｱｲﾃﾑ13・14で、矢側のすみ肉が反対側(基線の上)に描かれていました。また、v574で一部の溶接記号(25A-雑用水管-6 など)の矢を正しく見つけられなくなっていた問題も直しました。</li>
         <li>v574: 指示線が現場溶接の旗のポールより短い溶接記号で、ポールを指示線と取り違えて、旗が消え矢じりが記号の中に描かれていた問題を修正しました(40A 薬液供給管 3-3 の詳細ｱｲﾃﾑ14・15)。</li>
         <li>v573: すみ肉溶接の脚長の数字(例「3」)を、基線の向きによらず、いつも三角形のすぐ左に描くようにしました(JIS Z 3021 と指示書「全周隅肉3mm」の書き方に合わせました)。以前はファイルの記録どおり尾の外側に描いていたため、向きによって三角形の右に来たり左に来たりしていました。</li>
         <li>v572: 溶接記号の基線(折れ点の○から尾「く」まで)を、v571の約2/3の長さに短くしました。</li>
@@ -5356,22 +5357,28 @@
         // 矢がポールより短くなると、ポールを矢と取り違え、旗が消えて矢じりが記号の一部に見えていた
         // (40A 薬液供給管 3-3 の詳細ｱｲﾃﾑ14・15)。先に旗(三角形の塗りで、2つの頂点がその線の上に
         // 乗るもの)が付いている線は矢の候補から外す。
+        const knee0Of = (sg) => (touchesPt(ref0, sg[0], e0) ? sg[0] : sg[1]);
         const isFlagPole = (sg) => {
           const d = V.sub(sg[1], sg[0]), l = V.len(d);
           if (l < 1e-9) return false;
           const u = V.mul(d, 1 / l);
           for (const f of fillSets) {
             if (f.tris.length > 3) continue;
-            let on = 0;
-            const seen = [];
+            let on = 0, bothSides = false;
+            const seen = [], offs = [];
             for (const t of f.tris) for (const q of t) {
               if (seen.some((z) => dist(z, q) < l * 1e-4)) continue;
               seen.push(q);
               const w = V.sub(q, sg[0]), tt = V.dot(w, u);
               if (tt < -l * 0.02 || tt > l * 1.02) continue;
-              if (V.len(V.sub(w, V.mul(u, tt))) < l * 0.01) on++;
+              const perp = V.sub(w, V.mul(u, tt));
+              // 旗はポールの先(折れ点と反対の端)の側に付く。長い矢の付け根(折れ点)の近くにある旗を数えない
+              const farHalf = dist(q, knee0Of(sg)) > l * 0.5;
+              if (V.len(perp) < l * 0.01) { if (farHalf) on++; } else offs.push(perp);
             }
-            if (on >= 2) return true;
+            // 矢じり(塗り)は線の両側に広がる。旗は片側だけに出る
+            for (let i = 0; i < offs.length && !bothSides; i++) for (let j = i + 1; j < offs.length; j++) if (V.dot(offs[i], offs[j]) < 0) { bothSides = true; break; }
+            if (on >= 2 && !bothSides && offs.length) return true;
           }
           return false;
         };
@@ -5465,7 +5472,11 @@
       // v561: 文字の三角形の法線が、字形の読める向きと逆に記録されているファイルがあった
       // (40A 薬液供給管 3-3 の一部の溶接記号で「3」が鏡文字になった)。後の判定で裏側から
       // 見ている(鏡像)と分かったときは、上下はそのままで左右だけを入れ替えて読み直す。
-      const right = mirrorFront ? V.mul(V.cross(up, nF), -1) : V.cross(up, nF);
+      // v575: 'rot' は180°回転(上下・左右とも反対)で読み直す。現場溶接の旗のポールが下を向いて読めたときに使う
+      // 'vflip' は上下だけを反対にして読み直す(左右はそのまま)
+      const right0 = V.cross(up, nF);
+      if (mirrorFront === 'rot' || mirrorFront === 'vflip') up = V.mul(up, -1);
+      const right = (mirrorFront === true || mirrorFront === 'rot') ? V.mul(right0, -1) : right0;
       const L = dist(refFar, knee);
       if (L < 1e-9) return null;
       const to2 = (q) => { const d = V.sub(q, knee); return [V.dot(d, right) / L, V.dot(d, up) / L]; };
@@ -5473,7 +5484,7 @@
       const T = 0.03;
 
       // 4) 各要素の分類(2D、基線長=1)
-      let identY = null, tail = false, poleLen = 0, allAround = 0;
+      let identY = null, tail = false, poleLen = 0, allAround = 0, poleDir = 0;
       const tailSegs = [];
       const symSegs = []; // [[x1,y1],[x2,y2]]
       const symPolys = []; // [[x,y],...]
@@ -5491,7 +5502,7 @@
               (Math.min(Math.abs(a[0]), Math.abs(b[0])) < T || Math.min(Math.abs(a[0] - s), Math.abs(b[0] - s)) < T)) { identY = a[1]; continue; }
           if ((nearF(a) && b[0] * s > 1 - T) || (nearF(b) && a[0] * s > 1 - T)) { tail = true; tailSegs.push([a, b]); continue; }
           if ((nearK(a) && Math.abs(b[0]) < T && Math.abs(b[1]) > 0.2) || (nearK(b) && Math.abs(a[0]) < T && Math.abs(a[1]) > 0.2)) {
-            poleLen = Math.max(Math.abs(a[1]), Math.abs(b[1])); continue;
+            poleLen = Math.max(Math.abs(a[1]), Math.abs(b[1])); poleDir = Math.sign(Math.abs(a[1]) > Math.abs(b[1]) ? a[1] : b[1]); continue;
           }
           symSegs.push([a, b]);
         } else {
@@ -5503,6 +5514,16 @@
           if (mean < 0.35 && closed && ds.every((d) => Math.abs(d - mean) < mean * 0.2)) { allAround = mean; continue; }
           symPolys.push(pts);
         }
+      }
+      // v575: 現場溶接の旗は必ず基線の上へ立てる(JIS Z 3021 4.5.4)。ポールが下向きに読めたのは、
+      // 記号を上下逆さま(180°回転)に読んでいるということ(三角形の矢側・反対側も逆になる)。
+      // 40A 薬液供給管 3-3 の詳細ｱｲﾃﾑ13・14で、矢側のすみ肉が反対側に見えていた。
+      // 上下だけが逆(鏡像)なのか、180°回転なのかは、すみ肉などの縦の線が左に来る方(JIS 表1)で決める。
+      if (poleLen > 0 && poleDir < 0 && mirrorFront !== 'rot' && mirrorFront !== 'vflip') {
+        const r1 = analyzeWeldSymbol(itemRefs, 'vflip'), r2 = analyzeWeldSymbol(itemRefs, 'rot');
+        const good = (r) => r && !(r._vertRight > r._vertLeft);
+        const pick = good(r1) ? r1 : good(r2) ? r2 : (r1 || r2);
+        if (pick) return pick;
       }
       let field = poleLen > 0;
       let flagDims = null;
@@ -5699,6 +5720,7 @@
         backBead,
         backing,
         identLine: identY != null,
+        _vertRight: vertRight, _vertLeft: vertLeft,
         arrowDrawnAbove: flip,
       };
     }
