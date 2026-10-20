@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v572</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v573</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1314,6 +1314,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v573: すみ肉溶接の脚長の数字(例「3」)を、基線の向きによらず、いつも三角形のすぐ左に描くようにしました(JIS Z 3021 と指示書「全周隅肉3mm」の書き方に合わせました)。以前はファイルの記録どおり尾の外側に描いていたため、向きによって三角形の右に来たり左に来たりしていました。</li>
         <li>v572: 溶接記号の基線(折れ点の○から尾「く」まで)を、v571の約2/3の長さに短くしました。</li>
         <li>v571: 溶接記号の基線(三角形などの記号から尾「く」まで)が、サブアセンブリによっては長すぎて間延びして見えていた問題を修正しました。基線の長さを、CADに記録された長さではなく、どの溶接記号でも文字の高さに合わせた同じくらいの長さ(長すぎず短すぎない長さ)にそろえます。</li>
         <li>v570: v563で、一部の寸法(25A-雑用水管-5-2 の「121.50」など)の寸法線・寸法補助線がおかしな向きに描かれるようになっていた問題を修正しました。寸法補助線の端に二重に記録された短い線を、誤って矢印と見なしていました。</li>
@@ -12635,6 +12636,30 @@
     const isArr = (ln) => Array.isArray(ln);
     const ptsOfLine = (ln) => (isArr(ln) ? ln : ln.poly);
     const els = [];
+    // v573: すみ肉溶接で、脚長の数字(例「3」)が尾「<」の外側に記録されていると、基線の向きによって
+    // 数字が三角形の右に来たり左に来たりして、脚長にも長さにも見えてしまった。JIS Z 3021 では脚長は
+    // 基本記号の左に書く(指示書「全周隅肉3mm」の手書き図も、どの向きでも「3」は三角形のすぐ左)ため、
+    // 記号の左に文字が無いときは、尾の外側の数字を三角形の左(三角形と同じ側)へ移して描く。
+    try {
+      const k = ws.kinds || {};
+      const fA = (k.arrow || []).includes('fillet'), fO = (k.other || []).includes('fillet');
+      if ((fA || fO) && L.tailFills && L.tailFills.length) {
+        const side = fA ? -1 : 1;
+        let cMin = Infinity;
+        for (const ln of L.sym) { const a = ptsOfLine(ln); for (let i = 0; i + 1 < a.length; i += 2) if (a[i + 1] * side > 0.02) cMin = Math.min(cMin, a[i]); }
+        let leftText = false;
+        for (const t of L.symFills) { const cx = (t[0] + t[2] + t[4]) / 3; if (cx < cMin) leftText = true; }
+        if (Number.isFinite(cMin) && !leftText) {
+          let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+          for (const t of L.tailFills) for (let i = 0; i < 6; i += 2) { x0 = Math.min(x0, t[i]); x1 = Math.max(x1, t[i]); y0 = Math.min(y0, t[i + 1]); y1 = Math.max(y1, t[i + 1]); }
+          const w = x1 - x0, h = y1 - y0;
+          const dx = (cMin - 0.08 - w / 2) - (x0 + x1) / 2;
+          const dy = (side < 0 ? -(h / 2 + 0.06) : (h / 2 + 0.06)) - (y0 + y1) / 2;
+          const moved = L.tailFills.map((t) => [t[0] + dx, t[1] + dy, t[2] + dx, t[3] + dy, t[4] + dx, t[5] + dy]);
+          L = Object.assign({}, L, { symFills: L.symFills.concat(moved), tailFills: [] });
+        }
+      }
+    } catch (e) { /* そのまま */ }
     // v563: すみ肉の三角形など、2本以上の線がつながってできた記号が基線からわずかに(基線長の12%以内)
     // 離れていたら、一番近い点が基線にぴったり乗るよう上下に寄せる(どの溶接記号でも三角形を基線に付ける)。
     // 仕上げ記号(1本の線・円弧)は基線から離して描くものなので対象にしない。
