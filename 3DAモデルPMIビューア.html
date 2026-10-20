@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v568</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v569</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1314,6 +1314,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v569: v568で、置き場所が無いときに照合番号(バルーン)どうしが重なって置かれることがあった問題を修正しました。番号どうし・番号と指示線は重ねません。</li>
         <li>v568: 照合番号(バルーン)の指示線が長くなりすぎて、どこを指しているか分からなくなることがあった問題を修正しました。重なりを避けるためにずらす場合も、指示線は約50px以内に収め、遠くへは離しません。</li>
         <li>v567: 「PMIを一斉表示」のときや、見る角度の緩衝で表示を保っている照合番号でも、重なっている寸法補助線・寸法線・寸法値をその角度だけ隠すようにしました(マウスを近づけても重なったままの箇所があった問題の修正)。</li>
         <li>v567: 照合番号(バルーン)と重なるために隠すはずの寸法が、ちらつき防止の保持のせいで描かれ続け、マウスを近づけても寸法補助線が重なったまま残ることがあった問題を修正しました。</li>
@@ -19938,7 +19939,14 @@ pmi._lineFarPoint = null;
       const rectOnModelFine = (r) => { for (let i = 0; i < 5; i++) for (let j = 0; j < 5; j++) if (cover.atFine(r.x0 + 1 + (r.x1 - r.x0 - 2) * (i + 0.5) / 5, r.y0 + 1 + (r.y1 - r.y0 - 2) * (j + 0.5) / 5)) return true; return false; };
       const curDim = dimHits(cur), curModel = rectOnModelFine(cur.r), curArea = rectInDimArea(cur.r, dimAreasF);
       const curFar = Math.hypot(cur.K.x - O.x, cur.K.y - O.y) > NOTE_MAX_LEADER_PX + 4; // v554: 指している配管から遠すぎる
-      if (curDim === 0 && !curModel && !curArea && !curFar) { w._dimFixRel = null; continue; }
+      // v569: ほかの番号・溶接記号と重なっているときも、重ならない位置へずらす
+      let curPeer = false;
+      for (const q of peers) {
+        if (q === w) continue;
+        const o = shapeOf(q);
+        if (o && (ov(cur.r, o.r, 4) || segTouchesRect(cur.K, O, o.r, 2) || (o.L && segTouchesRect(o.L[0], o.L[1], cur.r, 2)))) { curPeer = true; break; }
+      }
+      if (curDim === 0 && !curModel && !curArea && !curFar && !curPeer) { w._dimFixRel = null; continue; }
       if (performance.now() - t0 > NOTE_DIM_FINAL_BUDGET_MS) {
         // 時間切れ: 残りは次のコマで調べる
         declutterSettleUntil = Math.max(declutterSettleUntil, performance.now() + 300); markRenderActive(300);
@@ -20024,6 +20032,12 @@ pmi._lineFarPoint = null;
             if (banned.some((b) => ov(r, b, 0))) return false;
             if (Math.hypot(sh.P.x - O.x, sh.P.y - O.y) < rad + 4) return false;
             if (!allowModel && (rectOnModel(r) || rectOnModelFine(r))) return false;
+            // v569: ほかの番号・溶接記号の丸や枠とは絶対に重ねない(指示線がほかの番号の上を通るのも不可)
+            for (const o of oth) {
+              if (ov(r, o.r, 4)) return false;
+              if (segTouchesRect(sh.K, O, o.r, 2)) return false;
+              if (o.L && segTouchesRect(o.L[0], o.L[1], r, 2)) return false;
+            }
             return true;
           };
           const degs = [0, 180, 15, 165, -15, 195, 30, 150, -30, 210, 45, 135, -45, 225, 60, 120, -60, 240, 75, 105, -75, 255, 90, -90];
