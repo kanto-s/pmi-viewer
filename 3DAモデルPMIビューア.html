@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v569</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v570</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1314,6 +1314,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v570: v563で、一部の寸法(25A-雑用水管-5-2 の「121.50」など)の寸法線・寸法補助線がおかしな向きに描かれるようになっていた問題を修正しました。寸法補助線の端に二重に記録された短い線を、誤って矢印と見なしていました。</li>
         <li>v569: v568で、置き場所が無いときに照合番号(バルーン)どうしが重なって置かれることがあった問題を修正しました。番号どうし・番号と指示線は重ねません。</li>
         <li>v568: 照合番号(バルーン)の指示線が長くなりすぎて、どこを指しているか分からなくなることがあった問題を修正しました。重なりを避けるためにずらす場合も、指示線は約50px以内に収め、遠くへは離しません。</li>
         <li>v567: 「PMIを一斉表示」のときや、見る角度の緩衝で表示を保っている照合番号でも、重なっている寸法補助線・寸法線・寸法値をその角度だけ隠すようにしました(マウスを近づけても重なったままの箇所があった問題の修正)。</li>
@@ -10675,7 +10676,7 @@
         let dimSeg = -1;
         for (let k = 0; k < L.length; k++) {
           if (k === i || k === j || used.has(k)) continue;
-          if ((d3(L[k][0], P) < eps || d3(L[k][1], P) < eps) && len(L[k]) > la * 1.2) { dimSeg = k; break; }
+          if ((d3(L[k][0], P) < eps || d3(L[k][1], P) < eps) && len(L[k]) > la * 0.5) { dimSeg = k; break; } // v570: 狭い寸法では矢印の方が長いこともある
         }
         if (dimSeg < 0) continue;
         const Q = d3(L[dimSeg][0], P) < eps ? L[dimSeg][1] : L[dimSeg][0];
@@ -10683,13 +10684,16 @@
         const ca = ((A[0] - P[0]) * u[0] + (A[1] - P[1]) * u[1] + (A[2] - P[2]) * u[2]) / (la * ul);
         const cb = ((B[0] - P[0]) * u[0] + (B[1] - P[1]) * u[1] + (B[2] - P[2]) * u[2]) / (lb * ul);
         if (Math.abs(ca) < 0.7 || Math.abs(cb) < 0.7 || Math.sign(ca) !== Math.sign(cb)) continue; // 開きが約45°以内
-        if (tris.some((t) => t.some((v) => d3(v, P) < la * 0.2))) continue; // 塗りつぶしの矢印がすでにある
+        // v570: 同じ線が二重に記録されているだけのもの(寸法補助線の端の短い線など)は矢印ではない。
+        // 矢印の2本は寸法線をはさんで別の向きに開いている(先の点どうしが離れ、寸法線と一直線ではない)。
+        if (d3(A, B) < Math.max(la, lb) * 0.2 || Math.abs(ca) > 0.995 || Math.abs(cb) > 0.995) continue;
+        if (tris.some((t) => t.some((v) => d3(v, P) < Math.max(eps * 20, la * 0.02)))) continue; // 塗りつぶしの矢印がすでにある(先端が同じ点)
         used.add(i); used.add(j);
         add.push([P.slice(), A.slice(), B.slice()]);
         break;
       }
     }
-    if (!add.length) return;
+    if (add.length !== 2) return; // v570: 両端の矢印がそろったときだけ置き換える(寸法線を組み立てられる形のときだけ)
     pmi.lines = L.filter((_, k) => !used.has(k));
     pmi.tris = tris.concat(add);
   }
