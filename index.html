@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v585</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v586</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1314,6 +1314,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v586: 指示線がモデルを横切るために隠した照合番号(バルーン)の丸だけが、数字の無い空の丸として残って表示されていた問題を修正しました。</li>
         <li>v585: 「表示/非表示」の寸法・注記・溶接記号の件数を、今の表示で出せるPMIの数にしました。全体表示のときに、まだ選んでいないサブアセンブリのSTEPの溶接記号まで数えていました。</li>
         <li>v584: 指示線がモデル(指している部品を含む)の上を長く通り、どこに指示線があるのか分からなくなる向きでも、そのPMIを表示しないようにしました。</li>
         <li>v583: 照合番号・注記・溶接記号の指示線が、画面上でモデルの上を通る(モデルを貫通して見える)向きでは、そのPMIを表示しないようにしました(選んでいるPMIは除く)。</li>
@@ -24521,9 +24522,11 @@ pmi._lineFarPoint = null;
           // 固定形状(pmi.noteOutlineLocal2D)を使うようにした。
           if (pmi.category !== 'note' || !pmi.noteOutlineLocal2D || pmi.noteOutlineLocal2D.length < 3) continue;
           if (!isCategoryVisible(pmi) || isAnnotationOccluded(pmi)) continue;
+          if (pmi._leaderCrossHidden) continue; // v586: 指示線がモデルを横切るので隠した番号は、丸(囲み線)も描かない
           const marker = markerEls.get(pmi.id);
           const tagEl = marker ? marker.querySelector('.pmi-tag') : null;
           if (!tagEl) continue;
+          if (marker.style.visibility === 'hidden') continue;
           const rect = tagEl.getBoundingClientRect();
           if (rect.width <= 0 || rect.height <= 0) continue;
           let local2D = pmi.noteOutlineLocal2D;
