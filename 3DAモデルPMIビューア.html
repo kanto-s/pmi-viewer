@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v580</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v581</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1314,6 +1314,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v581: STEPの元図形のまま描く溶接記号が、画面上でモデルに重なる(貫通して見える)向きでは表示しないようにしました。また、注記「&lt;11&gt;」の「&gt;」が消えていた問題を直しました(引出線の端が文字のそばにあると、その文字を指示点の丸と見なして消していました)。</li>
         <li>v580: 溶接記号の初期の大きさが小さすぎたため、モデル全体の大きさに合わせた見やすい大きさにしました(「溶接記号のサイズ」でさらに変えられます)。</li>
         <li>v579: 溶接記号をSTEPファイルに記録された元の図形(線・面の座標)のまま描くようにしました。記号本体だけを見やすい大きさにそろえ、引出線と矢の先はファイルの位置のまま動かしません。数字と隅肉の三角形が重なる場合だけ、数字を基線に沿ってずらします。</li>
         <li>v578: サブアセンブリを選んだときや通常の表示でも、照合番号・溶接記号などが互いに避け合って動き続けないようにしました。回転などを止めたら置き場所が落ち着いた時点(最大約0.8秒)で確定し、視点を変えるかマウスで寸法を拡大するまで動かしません。</li>
@@ -13296,6 +13297,7 @@
     }
     const d3 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
     const kept = [];
+    // v581: 指示点の丸の判定を、引出線の端が丸の中心にあるものだけに絞った(「<11>」の「>」が消えていたため)
     for (const set of sets) {
       const pts = set.flat();
       const c = [0, 0, 0];
@@ -13305,7 +13307,9 @@
       for (const p of pts) r = Math.max(r, d3(p, c));
       let junk = false;
       for (const e of freeEnds) {
-        if (d3(c, e) < Math.max(r * 0.25, 0.02)) { junk = true; break; } // 指示点(端点を中心とする丸)
+        // 指示点の丸は、引出線の端がちょうど丸の中心にある(実測で半径の3%以内)。文字(「<11>」の「>」など)は
+        // 引出線の端が近くても中心からは半径の2割ほど離れているので、半径の1割以内のものだけを指示点とする。
+        if (d3(c, e) < Math.max(r * 0.1, 0.02)) { junk = true; break; } // 指示点(端点を中心とする丸)
         if (set.length <= 1 && pts.some((p) => d3(p, e) < Math.max(r * 0.02, 0.01))) { junk = true; break; } // 矢じり
       }
       if (!junk) kept.push({ tris: set, c });
@@ -22095,6 +22099,36 @@ pmi._lineFarPoint = null;
       // 描く(モデル本体・モデルのエッジ表示には無効化をかけない)。
       gl.disable(gl.DEPTH_TEST);
       updateDimThinning(mvp);
+      // v581: STEPの元図形のまま描く溶接記号が、画面上でモデルに重なる(貫通して見える)ときは表示しない。
+      // 指示線と矢の先(モデルを指す部分)は数えない。境目でちらつかないよう、消すときと戻すときの割合を変える。
+      try {
+        const cov = getScreenCover(mvp);
+        if (cov) {
+          for (const pmi of pmiList) {
+            if (!pmi._faithfulStepWeld || !isCategoryVisible(pmi) || pmi._farOccluded) { if (pmi._faithfulWeldOnModel) pmi._faithfulWeldOnModel = false; continue; }
+            const tip = pmi._faithfulWeldFixedTip, joint = pmi._faithfulWeldSymbolJoint;
+            const dd = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+            const near = tip && joint ? dd(tip, joint) * 0.25 : 0;
+            let n = 0, hit = 0;
+            const test = (q) => {
+              if (tip && dd(q, tip) < near) return;
+              const sp = project(mvp, q);
+              if (!sp) return;
+              n++;
+              if (cov.atFine(sp.x, sp.y)) hit++;
+            };
+            for (const seg of pmi.lines || []) {
+              if (!seg || seg.length < 2) continue;
+              if (tip && (dd(seg[0], tip) < 0.05 || dd(seg[seg.length - 1], tip) < 0.05)) continue; // 指示線
+              for (let k = 0; k <= 4; k++) { const t = k / 4, a = seg[0], b = seg[seg.length - 1]; test([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]); }
+            }
+            for (const tr of pmi.tris || []) test([(tr[0][0] + tr[1][0] + tr[2][0]) / 3, (tr[0][1] + tr[1][1] + tr[2][1]) / 3, (tr[0][2] + tr[1][2] + tr[2][2]) / 3]);
+            const frac = n ? hit / n : 0;
+            pmi._faithfulWeldOnModel = hit > 0; // モデルに少しでも重なれば出さない(重ならなくなればすぐ戻す)
+            if (pmi._faithfulWeldOnModel) { pmi._farOccluded = true; pmi._markerOccluded = true; }
+          }
+        }
+      } catch (e) { /* 次のコマで */ }
       // v510: 直前まで表示していて今回非表示になったPMIは、フェードアウトが終わるまで描き続ける
       for (const pmi of pmiList) {
         const hiddenNow = !isCategoryVisible(pmi) || pmi._markerOccluded || pmi._farOccluded || pmi._dimThinHidden || pmi._noModelLeader;
