@@ -1170,7 +1170,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v595</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v596</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1318,6 +1318,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v596: 「PMIを一斉表示」のときに動作が重くなる問題を軽くしました。溶接記号の継ぎ目の色を決めるための画面の読み取りを、毎コマではなく視点が変わったときだけにし、置き場所の重なり判定で、明らかに離れているものを先に除くようにしました(表示結果は同じ)。</li>
         <li>v595: 照合番号・注記・溶接記号の指示線どうしが交差する(たすき掛けに指す)ときは、2つの置き場所を入れ替えて、それぞれ近い側から指すようにしました。</li>
         <li>v594: 文字が多く横に長い四角の注記(「F3 B4 G5」など)は、正方形ではなく文字に合わせた長方形の枠で描くようにしました(照合番号のような短い数字はこれまでどおり正方形)。</li>
         <li>v593: 溶接記号が表示されていない(指示線がモデルの上を通るため隠した・件数制限・裏側などで非表示になっている)箇所では、継ぎ目のハイライトを出さないようにしました。実際に画面に出ている溶接記号の継ぎ目だけを明るく描きます。</li>
@@ -8721,6 +8722,7 @@
   // "up" is an arbitrary rendering choice, it does not change the PMI
   // positions relative to each other or to the file's real coordinates.
   let pmiList = [];
+  let lastSeamVk = null; // v596
   // QIF風PMI一覧・実測値比較・ルールベース解説機能のための状態。
   // measuredValues: pmi.id -> { measured: number|null, tolerance: number|null }
   // (このブラウザ上でユーザーが入力する値であり、STEPファイル由来のデータではない)
@@ -9131,6 +9133,7 @@
   let occPickPath = null;
   // v398: 単体表示・PMIの絞り込み
   let modelAllTris = null;
+  let modelVertexColors = null; // v596
   let modelAllNormals = null;  // v538: modelAllTrisと同じ並びの頂点法線(溶接の矢の先が表を向いているかの判定に使う)     // モデル全体の三角形(modelOcclusionTrisは単体表示中は選択部分だけになる)
   let occView = 'all';         // 'all' = 全体 / 'ghost' = 周りを薄く / 'solo' = 選択部だけ
   // v403: サブアセンブリを選んだとき自動で使う表示方法。最初は「周りを薄く」で、
@@ -9381,6 +9384,7 @@
         gl.bufferData(gl.ARRAY_BUFFER, colors, gl.STATIC_DRAW);
       }
       modelFaceData = { posBuf, normBuf, colBuf, count: positions.length / 3 };
+      modelVertexColors = colors; // v596: 継ぎ目の色を決めるのに使う(画面の読み取りをやめる)
 
       // エリア表示切り替え用に、三角形ごとの重心からエリアを判定し、
       // エリアごとに絞り込んだ専用のバッファも作っておく(全エリア表示
@@ -19546,6 +19550,8 @@ pmi._lineFarPoint = null;
     return t > 0.02 && t < 0.98 && u > 0 && u < 1;
   }
   function segTouchesRect(a, b, r, m) {
+    // v596: 線分の外接矩形と枠が離れていれば必ず触れないので、先に除く(結果は同じで、PMIの一斉表示時に大幅に速くなる)
+    if ((a.x < b.x ? b.x : a.x) <= r.x0 - m || (a.x < b.x ? a.x : b.x) >= r.x1 + m || (a.y < b.y ? b.y : a.y) <= r.y0 - m || (a.y < b.y ? a.y : b.y) >= r.y1 + m) return false;
     const R = { x0: r.x0 - m, x1: r.x1 + m, y0: r.y0 - m, y1: r.y1 + m };
     const inside = (q) => q.x > R.x0 && q.x < R.x1 && q.y > R.y0 && q.y < R.y1;
     if (inside(a) || inside(b)) return true;
@@ -20045,7 +20051,15 @@ pmi._lineFarPoint = null;
         }
       }
     } catch (e) { console.warn('照合番号のまとめての配置に失敗しました', e); }
-    for (let pass = 0; pass < 2; pass++) for (const w of welds) {
+    // v596: PMIが多い(一斉表示など)ときに1コマで時間を使いすぎないよう、約12msで打ち切り、残りは次のコマで行う。
+    // 毎回同じものだけが後回しにならないよう、調べ始める順番をずらす。
+    const tRB = performance.now();
+    resolveSeq++;
+    const rot = welds.length ? resolveSeq % welds.length : 0;
+    const weldsOrd = welds.slice(rot).concat(welds.slice(0, rot));
+    let rbStop = false;
+    for (let pass = 0; pass < 2 && !rbStop; pass++) for (const w of weldsOrd) {
+      if (performance.now() - tRB > 12) { rbStop = true; markRenderActive(200); declutterSettleUntil = Math.max(declutterSettleUntil, performance.now() + 200); break; }
       if (jointDone.has(w)) continue; // v508: まとめて置いた照合番号は動かさない
       const g = geo.get(w);
       if (!g || !(g.w > 0)) continue;
@@ -20339,6 +20353,7 @@ pmi._lineFarPoint = null;
     return ev ? ev.frac > 0 : null;
   }
   const WELD_FINAL_BUDGET_MS = 12; // 1コマあたりの最終確認の置き直し探しの時間の上限
+  let resolveSeq = 0; // v596
   let weldFinalSeq = 0; // v534: 最終確認の回数(矢の先をそのコマの描画に引き継ぐため)
   // v534: 近く(指示線 LEADER_HARD_PX 以内)に横切らない置き場所が無いときは、指示線を長くしてでも
   // モデルの外へ出す(拡大していると、近くは全部モデルの上になるため)。指示線の長さの上限。
@@ -22361,22 +22376,27 @@ pmi._lineFarPoint = null;
           // v553: 白い線は黄色など明るい配管の上では見分けにくかった。指している点の配管の色を画面から読み取り、
           // 明るい配管の上では濃いピンク、暗い配管(青・緑など)の上では白で描く(縁取り・輪は付けない)。
           const mvpSeam = currentMvp();
+          const seamVk = noteViewKey(); // v596: 継ぎ目の色の読み取り(readPixels)は重いので、視点が変わったときだけ行う
+          // 視点が前のコマから変わっている間(慣性で回っている間も)は読まない
+          const seamMoving = isUserViewMoving(performance.now()) || seamVk !== lastSeamVk;
+          lastSeamVk = seamVk;
+          let seamReads = 0;
+          // v596: 継ぎ目の線の色は、指している点の配管の色(STEPの面の色)の明るさで決める。以前は毎コマ画面を
+          // 読み取って(readPixels)いたため、溶接記号が多い「PMIを一斉表示」のときに大幅に重くなっていた。
           const seamColorFor = (w) => {
+            if (w._seamColor && w._seamColorSrc === w._modelAttachmentPoint) return w._seamColor;
+            let col = null;
             try {
-              const O = project(mvpSeam, w._modelAttachmentPoint);
-              if (!O) return COLOR_WELD_SEAM;
-              const dprR = window.devicePixelRatio || 1;
-              const x = Math.round(O.x * canvas.width / Math.max(1, cvSize().w)), y = Math.round(canvas.height - O.y * canvas.height / Math.max(1, cvSize().h));
-              if (x < 1 || y < 1 || x >= canvas.width - 1 || y >= canvas.height - 1) return w._seamColor || COLOR_WELD_SEAM;
-              const buf = new Uint8Array(4 * 9);
-              gl.readPixels(x - 1, y - 1, 3, 3, gl.RGBA, gl.UNSIGNED_BYTE, buf);
-              let lum = 0;
-              for (let k = 0; k < 9; k++) lum += (0.2126 * buf[k * 4] + 0.7152 * buf[k * 4 + 1] + 0.0722 * buf[k * 4 + 2]) / 255;
-              lum /= 9;
-              void dprR;
-              w._seamColor = lum > 0.45 ? COLOR_WELD_SEAM_ON_LIGHT : COLOR_WELD_SEAM;
-              return w._seamColor;
-            } catch (e) { return w._seamColor || COLOR_WELD_SEAM; }
+              if (modelVertexColors && modelAllTris && w._modelAttachmentPoint) {
+                const nt = nearestTriangle(modelAllTris, w._modelAttachmentPoint);
+                if (nt && nt.t != null) { const o = nt.t * 9; col = [modelVertexColors[o], modelVertexColors[o + 1], modelVertexColors[o + 2]]; }
+              }
+            } catch (e) { col = null; }
+            if (!col) col = COLOR_MODEL;
+            const lum = 0.2126 * col[0] + 0.7152 * col[1] + 0.0722 * col[2];
+            w._seamColor = lum > 0.45 ? COLOR_WELD_SEAM_ON_LIGHT : COLOR_WELD_SEAM;
+            w._seamColorSrc = w._modelAttachmentPoint;
+            return w._seamColor;
           };
           const drawOff = (line, offs, color) => {
             for (const [sx, sy] of offs) { gl.uniform2f(uNdcShiftLoc, sx * px * dpr, sy * py * dpr); drawLines(line, color); }
