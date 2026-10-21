@@ -347,6 +347,13 @@
   .pmi-tag.has-glyph { display: inline-flex; align-items: center; justify-content: center; line-height: 0; }
   .pmi-tag.has-glyph .note-glyph-svg { display: block; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.7)); }
   .pmi-tag.is-note-box.has-glyph { padding: 4px 6px; }
+  /* v591: 四角の枠の照合番号(「10」「2」など)は縦横比を同じ(正方形)にする。幅と高さの小さい方を
+     大きい方に合わせ、文字は中央に置く。 */
+  .pmi-tag.is-note-box, .pmi-tag.is-note-outlined {
+    box-sizing: border-box; min-width: 2em; height: 2em; line-height: 1;
+    display: inline-flex; align-items: center; justify-content: center; padding: 2px 4px;
+  }
+  .pmi-tag.is-note-box.has-glyph { height: auto; min-height: 2em; aspect-ratio: 1 / 1; padding: 4px; }
   .pmi-row .row-nominal .note-glyph-svg { display: block; }
   .pmi-tag.is-note-bracket {
     background: none; border: none; color: #F5FAF8;
@@ -1166,7 +1173,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v590</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v591</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1314,6 +1321,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v591: 四角の枠の照合番号(「10」「2」など)を、縦横比が同じ正方形の枠で表示するようにしました。</li>
         <li>v590: T字エルボ(ティー)の付け根がピラミッドのように尖って見えたり、エルボの曲面がギザギザに見えたり、バルブのハンドルが円板のように塗りつぶされて見えたりしていた問題を修正しました。曲面を三角形に分けるとき、円筒の端の円などの境界の点や内側の点が一部省かれ、三角形が曲面の内側を横切っていたためです。省かれた点を曲面の上に戻し、ほかの配管と同じようになめらかに表示します。</li>
         <li>v589: サブアセンブリを選んで見ているときに、モデルの無い所をタップ(クリック)しても全体表示に戻らないようにしました。全体表示に戻るのは「全体表示に戻す」ボタン(または選択欄の✕)を押したときだけです。</li>
         <li>v588: SOLIDWORKSで溶接記号をISO方式(破線付き)で書き出したSTEP(雑用水管系統)も、40A 薬液供給管 3-3 と同じく JIS Z 3021 の描き方にそろえました。破線は描かず、すみ肉の三角形は矢側として基線の下に描きます。</li>
@@ -9214,7 +9222,7 @@
       const e1 = (side(0) + side(2)) / 2, e2 = (side(1) + side(3)) / 2;
       const r = Math.max(e1, e2) / Math.max(1e-9, Math.min(e1, e2));
       let w, h;
-      if (r < 1.35) { w = h = Math.max(dstW, dstH); }
+      if (r < 1.35 || true) { w = h = Math.max(dstW, dstH); } // v591: 四角の枠は常に縦横比1(正方形)で描く
       else {
         const wide = dstW >= dstH;
         const rr = wide ? r : 1 / r;
