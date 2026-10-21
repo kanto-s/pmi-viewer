@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v578</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v579</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1314,6 +1314,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v579: 溶接記号をSTEPファイルに記録された元の図形(線・面の座標)のまま描くようにしました。記号本体だけを見やすい大きさにそろえ、引出線と矢の先はファイルの位置のまま動かしません。数字と隅肉の三角形が重なる場合だけ、数字を基線に沿ってずらします。</li>
         <li>v578: サブアセンブリを選んだときや通常の表示でも、照合番号・溶接記号などが互いに避け合って動き続けないようにしました。回転などを止めたら置き場所が落ち着いた時点(最大約0.8秒)で確定し、視点を変えるかマウスで寸法を拡大するまで動かしません。</li>
         <li>v577: 「PMIを一斉表示」のときに、照合番号・溶接記号などが互いに避け合って動き続けていた問題を修正しました。回転などを止めたらすぐ(約0.3〜0.8秒で)置き場所を確定し、視点を変えるまでは動かしません。</li>
         <li>v576: 「PMIを一斉表示」のときは、照合番号(バルーン)と重なる寸法も隠さず、すべての寸法(寸法線・寸法補助線・寸法値)を表示するようにしました。通常の表示では従来どおり、重なる寸法はその角度だけ表示しません。</li>
@@ -10772,7 +10773,7 @@
     const flat = [];
     // JIS B 0001:2019 の寸法線・寸法補助線は render() で投影再構成する。
     // 寸法文字と端末記号(矢印)の既存処理には触れない。
-    const segsToDraw = pmi.category === 'weld' ? weldMainLineSegments(pmi.lines) :
+    const segsToDraw = (pmi.category === 'weld' && !pmi._faithfulStepWeld) ? weldMainLineSegments(pmi.lines) :
       pmi.category === 'dimension' ? [] : pmi.lines;
     // v137: 各セグメントの中点を、実際に描画するのと同じ座標(posOffsets/
     // lineEndOffsets適用後)で覚えておく。「793.2」のように複数のセグメン
@@ -15316,6 +15317,15 @@
     buildModelBuffers(modelData || {});
     }
 
+    // STEP AP242 グラフィックPMI忠実表示:
+    // 溶接記号を独自SVGに置換せず、元の曲線・面の座標で描画する。
+    // asRecorded は既存の生PMI描画経路を使用するフラグ。
+    for (const p of scenePmis) {
+      if (p.category === 'weld') {
+        p.asRecorded = true;
+        p._faithfulStepWeld = true;
+      }
+    }
     pmiList = scenePmis;
     bomList = pmiData.bom || [];
     for (const pmi of pmiList) {
@@ -16929,6 +16939,106 @@
 
   // v449: 他CADのPMI(pmi.asRecorded)用。SOLIDWORKS向けの読み替え(文字の拡大・バルーン化・
   // 引出線の付け替え等)はせず、ファイルに記録された位置・形のまま描画用のデータを作る。
+  // v14: STEPでテッセレーションされた文字と、閉じた隅肉三角形の衝突だけを
+  // 解消する。引出線、基線、溶接指示位置は動かさない。
+  // 幾何的に三角形を特定できない場合は元のSTEP図形を保持する。
+  function separateRecordedWeldDigits(pmi, leaderIndex, scale) {
+    const lines=pmi.lines||[], tris=pmi.tris||[];
+    if (!lines.length || !tris.length) return;
+    const eps=1e-3;
+    const dist=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1],a[2]-b[2]);
+    const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+    const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]];
+    const norm=v=>{const d=Math.hypot(...v);return d>1e-8?v.map(x=>x/d):null;};
+    // 線分の端点が一致する閉じた三角形のみを隅肉記号と認める。
+    const edges=[];
+    for(let i=0;i<lines.length;i++) {
+      if(i===leaderIndex || lines[i].length!==2) continue;
+      const a=lines[i][0],b=lines[i][1],len=dist(a,b);
+      if(len>eps && len<120*scale) edges.push({a,b,len,i});
+    }
+    let symbol=null;
+    outer: for(let i=0;i<edges.length;i++) for(let j=i+1;j<edges.length;j++) for(let k=j+1;k<edges.length;k++) {
+      const es=[edges[i],edges[j],edges[k]];
+      const v=[];
+      for(const e of es) for(const p of [e.a,e.b]) {
+        let q=v.find(o=>dist(o.p,p)<Math.max(eps,e.len*0.004));
+        if(q) q.n++; else v.push({p,n:1});
+      }
+      if(v.length!==3 || v.some(x=>x.n!==2)) continue;
+      const a=v[0].p,b=v[1].p,c=v[2].p;
+      const ab=sub(b,a),ac=sub(c,a);
+      const area=Math.hypot(ab[1]*ac[2]-ab[2]*ac[1],ab[2]*ac[0]-ab[0]*ac[2],ab[0]*ac[1]-ab[1]*ac[0]);
+      if(area<1e-3) continue;
+      const lens=es.map(x=>x.len).sort((a,b)=>a-b);
+      // ほぼ直角三角形であることを確認。誤って他の装飾を移動させない。
+      if(Math.abs(lens[0]**2+lens[1]**2-lens[2]**2)>0.22*lens[2]**2) continue;
+      symbol={vertices:[a,b,c],edges:es,span:lens[2]};break outer;
+    }
+    if(!symbol) return;
+    const A=symbol.vertices[0],B=symbol.vertices[1],C=symbol.vertices[2];
+    // v16: 斜辺をU軸にすると数字が斜めに移動し、STEPの上下関係が崩れる。
+    // 隅肉三角形の直角をなす二辺のうち、基線と平行な辺をU軸とする。
+    const eSort=symbol.edges.slice().sort((a,b)=>a.len-b.len);
+    const hyp=eSort[2];
+    const legs=eSort.slice(0,2);
+    const mid=e=>e.a.map((x,j)=>(x+e.b[j])/2);
+    // 三角形以外の長い線分のうち、三角形付近にある基線を優先する。
+    const triIds=new Set(symbol.edges.map(e=>e.i));
+    const center=symbol.vertices[0].map((_,j)=>symbol.vertices.reduce((z,p)=>z+p[j],0)/3);
+    let baseline=null,baselineScore=-Infinity;
+    for(let i=0;i<lines.length;i++) {
+      if(i===leaderIndex || triIds.has(i) || lines[i].length!==2)continue;
+      const e={a:lines[i][0],b:lines[i][1]};
+      const d=dist(e.a,e.b);
+      if(d<symbol.span*0.85)continue;
+      const proximity=dist(mid(e),center);
+      if(proximity>symbol.span*5)continue;
+      const score=d/(1+proximity/symbol.span);
+      if(score>baselineScore){baseline=e;baselineScore=score;}
+    }
+    let along=legs[0];
+    if(baseline){
+      const ref=norm(sub(baseline.b,baseline.a));
+      along=legs.slice().sort((x,y)=>Math.abs(dot(norm(sub(y.b,y.a)),ref))-Math.abs(dot(norm(sub(x.b,x.a)),ref)))[0];
+    } else along=legs.slice().sort((x,y)=>y.len-x.len)[0];
+    const U=norm(sub(along.b,along.a));
+    if(!U)return;
+    const other=legs.find(e=>e!==along);
+    const v0=sub(other.b,other.a);
+    const perpendicular=sub(v0,U.map(x=>x*dot(v0,U)));
+    const V=norm(perpendicular);
+    if(!V)return;
+    const proj=q=>[dot(sub(q,A),U),dot(sub(q,A),V)];
+    const box=points=>{const q=points.map(proj);return [Math.min(...q.map(x=>x[0])),Math.max(...q.map(x=>x[0])),Math.min(...q.map(x=>x[1])),Math.max(...q.map(x=>x[1]))];};
+    const sb=box(symbol.vertices), span=Math.max(sb[1]-sb[0],sb[3]-sb[2]);
+    // 共有頂点で結ばれるメッシュごとに文字の輪郭を取得。
+    const parent=tris.map((_,i)=>i);
+    const root=i=>{while(parent[i]!==i){parent[i]=parent[parent[i]];i=parent[i];}return i;};
+    const verts=new Map();
+    const key=q=>q.map(x=>Math.round(x/Math.max(1e-4,span*1e-5))).join(',');
+    tris.forEach((t,i)=>t.forEach(q=>{const k=key(q);if(verts.has(k)){const a=root(i),b=root(verts.get(k));if(a!==b)parent[a]=b;}else verts.set(k,i);}));
+    const groups=new Map();
+    tris.forEach((t,i)=>{const r=root(i);if(!groups.has(r))groups.set(r,[]);groups.get(r).push(i);});
+    const pad=span*0.12;
+    for(const indices of groups.values()) {
+      if(indices.length<2)continue;
+      const pts=indices.flatMap(i=>tris[i]);const bb=box(pts);
+      const width=bb[1]-bb[0],height=bb[3]-bb[2];
+      if(width>span*1.4 || height>span*1.4)continue;
+      // 三角形に接していない文字には触れない。
+      const overlapU=Math.min(bb[1],sb[1])-Math.max(bb[0],sb[0]);
+      const overlapV=Math.min(bb[3],sb[3])-Math.max(bb[2],sb[2]);
+      if(overlapU< -pad*0.3 || overlapV< -pad*0.3)continue;
+      // 基線に平行なU方向だけへ移動する。元の上下位置（V座標）は維持。
+      const left=bb[1]-(sb[0]-pad),right=(sb[1]+pad)-bb[0];
+      const delta=Math.abs(left)<Math.abs(right)?-left:right;
+      if(!Number.isFinite(delta) || Math.abs(delta)>span*2)continue;
+      const shift=U.map(x=>x*delta);
+      for(const i of indices) tris[i]=tris[i].map(q=>q.map((v,j)=>v+shift[j]));
+    }
+  }
+
   function setupRecordedPmiGeometry(pmi) {
     pmi._billboardTriData = null;
     pmi._billboardCentroid = null;
@@ -16946,9 +17056,10 @@
     pmi._lineFarPoint = null;
     pmi._lineFarTest = null;
     pmi._lineNearPoint = null;
-    pmi._modelAttachmentPoint = null;
+    pmi._modelAttachmentPoint = (pmi._faithfulStepWeld && pmi._faithfulWeldModelPoint)
+      ? pmi._faithfulWeldModelPoint.slice() : null;
     pmi._noModelLeader = false;
-    try { prepareRecordedMirror(pmi); } catch (e) { console.warn('prepareRecordedMirror failed:', pmi.name, e); pmi._recMirror = null; }
+    if (!pmi._faithfulStepWeld) try { prepareRecordedMirror(pmi); } catch (e) { console.warn('prepareRecordedMirror failed:', pmi.name, e); pmi._recMirror = null; }
     rebuildPmiLineBuffer(pmi);
   }
 
@@ -17490,7 +17601,77 @@
     annotateGenericIconClusters(pmiList);
     for (const pmi of pmiList) {
       // v449: 他CADのPMI(汎用の読み取り)は、記録された線・三角形(文字・矢印)をそのまま描く。
-      if (pmi.asRecorded) { setupRecordedPmiGeometry(pmi); continue; }
+      if (pmi.asRecorded) {
+        // v12: STEP原図形を維持しつつ「記号本体」だけ拡大する。
+        // モデル側の引出線と矢の先端は絶対に拡大しない。
+        if (pmi.category === 'weld' && pmi._faithfulStepWeld) {
+          const attachment = findLeaderModelAttachment(pmi);
+          const tip = attachment && attachment.endpoint;
+          // 記号本体の実寸を測り、全溶接記号を共通の控えめな寸法へ揃える。
+          // スライダー倍率は記号・数字の両方へ同一係数として掛ける。
+          const userScale = WELD_TEXT_TARGET_RADIUS / DEFAULT_WELD_TEXT_TARGET_RADIUS;
+          let k = userScale;
+          if (tip && tip.length === 3) {
+            pmi._faithfulWeldFixedTip = tip.slice();
+            pmi._faithfulWeldModelPoint = (attachment.point || tip).slice();
+          }
+          if (tip) {
+            const lines = pmi.lines || [];
+            const dist = (a,b) => Math.hypot(a[0]-b[0],a[1]-b[1],a[2]-b[2]);
+            const lengths = lines.map(seg => seg.length>=2 ? dist(seg[0],seg[seg.length-1]) : 0);
+            // 指示端点に実際につながる線のうち、最長のものをモデル側引出線とする。
+            // 近傍の別の線を選ぶと矢印の位置が動くので、端点一致を必須とする。
+            const tol=0.05;
+            let leader=-1;
+            for(let i=0;i<lines.length;i++) {
+              const seg=lines[i];
+              if(seg.length<2)continue;
+              if(Math.min(dist(seg[0],tip),dist(seg[seg.length-1],tip))<=tol &&
+                 (leader<0 || lengths[i]>lengths[leader])) leader=i;
+            }
+            if(leader>=0) {
+              const L=lines[leader];
+              const joint=dist(L[0],tip)>dist(L[L.length-1],tip) ? L[0].slice() : L[L.length-1].slice();
+              const leaderLen=lengths[leader];
+              // 指示線を除いた、接続点近傍の基本記号・文字だけを測定。
+              // 元STEPの長い引出線をサイズ算定に含めない。
+              const symbolPts=[];
+              for(let i=0;i<lines.length;i++) {
+                if(i===leader || lengths[i]>leaderLen*0.65)continue;
+                for(const q of lines[i]) if(dist(q,joint)<leaderLen*0.7)symbolPts.push(q);
+              }
+              for(const tri of (pmi.tris||[])) for(const q of tri)
+                if(dist(q,joint)<leaderLen*0.7)symbolPts.push(q);
+              if(symbolPts.length>=3) {
+                const lo=[Infinity,Infinity,Infinity],hi=[-Infinity,-Infinity,-Infinity];
+                for(const q of symbolPts)for(let j=0;j<3;j++) {lo[j]=Math.min(lo[j],q[j]);hi[j]=Math.max(hi[j],q[j]);}
+                const extent=Math.max(...hi.map((v,j)=>v-lo[j]));
+                // 初期の共通目標を22mmに引き上げる。ファイル単位の倍率は持たない。
+                if(Number.isFinite(extent)&&extent>0.1) k=userScale*Math.max(0.3,Math.min(5,22/extent));
+              }
+              const sc=q=>[joint[0]+(q[0]-joint[0])*k,joint[1]+(q[1]-joint[1])*k,joint[2]+(q[2]-joint[2])*k];
+              // 引出線・矢先端・矢尻のメッシュは原座標に固定する。
+              // 記号本体側の図形だけを接続点を中心に等倍率で変更する。
+              const symbolLimit=leaderLen*0.7;
+              pmi.lines=lines.map((seg,i)=>{
+                if(i===leader || lengths[i]>leaderLen*0.65)return seg;
+                const c=seg.reduce((a,q)=>[a[0]+q[0],a[1]+q[1],a[2]+q[2]],[0,0,0]).map(x=>x/seg.length);
+                return dist(c,joint)<symbolLimit && dist(c,joint)<dist(c,tip) ? seg.map(sc):seg;
+              });
+              pmi.tris=(pmi.tris||[]).map(tri=>{
+                const c=tri.reduce((a,q)=>[a[0]+q[0],a[1]+q[1],a[2]+q[2]],[0,0,0]).map(x=>x/tri.length);
+                return dist(c,joint)<symbolLimit && dist(c,joint)<dist(c,tip) ? tri.map(sc):tri;
+              });
+              pmi._faithfulWeldSymbolJoint=joint;
+            }
+          }
+          // 拡大率が1倍の場合にも、文字と隅肉三角形の干渉判定を実行する。
+          // 倍率変更後の図形に対して一度だけ実行し、同率拡縮を維持する。
+          separateRecordedWeldDigits(pmi, -1, k);
+        }
+        setupRecordedPmiGeometry(pmi);
+        continue;
+      }
       // every category (dimension/note/weld) can carry filled triangle
       // glyphs -- the real tessellated shape of the text/symbol, when the
       // STEP file recorded one (see extract_pmi.py).
@@ -21810,11 +21991,11 @@ pmi._lineFarPoint = null;
       // 表示しているすべての溶接記号について描き、選んだ溶接記号はさらに太くし、モデルの陰になる部分も薄く透かして描く。
       if (gl && pmiList && pmiList.length) {
         const shownW = pmiList.filter((p) => {
-          if (p.category !== 'weld' || p.asRecorded || !p._modelAttachmentPoint || p._markerOccluded) return false;
+          if (p.category !== 'weld' || !p._modelAttachmentPoint || p._markerOccluded) return false;
           if (p.id === selectedId) return true;
           if (!isCategoryVisible(p)) return false;
           const el = markerEls.get(p.id);
-          return !!el && el.style.display !== 'none';
+          return p._faithfulStepWeld ? true : (!!el && el.style.display !== 'none');
         });
         if (shownW.length) {
           const px = 2 / Math.max(1, canvas.width), py = 2 / Math.max(1, canvas.height);
