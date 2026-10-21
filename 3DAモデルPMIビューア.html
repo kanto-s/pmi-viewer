@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v589</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v590</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1314,6 +1314,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v590: T字エルボ(ティー)の付け根がピラミッドのように尖って見えたり、エルボの曲面がギザギザに見えたり、バルブのハンドルが円板のように塗りつぶされて見えたりしていた問題を修正しました。曲面を三角形に分けるとき、円筒の端の円などの境界の点や内側の点が一部省かれ、三角形が曲面の内側を横切っていたためです。省かれた点を曲面の上に戻し、ほかの配管と同じようになめらかに表示します。</li>
         <li>v589: サブアセンブリを選んで見ているときに、モデルの無い所をタップ(クリック)しても全体表示に戻らないようにしました。全体表示に戻るのは「全体表示に戻す」ボタン(または選択欄の✕)を押したときだけです。</li>
         <li>v588: SOLIDWORKSで溶接記号をISO方式(破線付き)で書き出したSTEP(雑用水管系統)も、40A 薬液供給管 3-3 と同じく JIS Z 3021 の描き方にそろえました。破線は描かず、すみ肉の三角形は矢側として基線の下に描きます。</li>
         <li>v587: 溶接記号の三角形などを、STEPに記録された上下の位置のまま描くようにしました(80A以外で、CADでは基線の下にある三角形が上に描かれていました)。ISO方式の破線(識別線)が記録されている記号は、その破線も描きます。</li>
@@ -2575,7 +2576,44 @@
       return segs;
     }
 
+    // v590: 「T字エルボ」の円筒面のように、境界(展開図で波形になる楕円の稜線など)の点だけを結ぶ
+    // 従来の方法では、三角形が円筒の内側を弦で横切り、ピラミッドのような尖った形になることがあった。
+    // 従来の方法の結果が曲面から大きく外れている円筒・円すい面だけ、内側にも点を足す改良版で分け直す
+    // (きれいに表示できている面は、これまでと同じ結果のまま)。
     triangulateFace(faceRef) {
+      const legacy = this._triangulateFaceBase(faceRef);
+      try {
+        if (legacy && legacy.length && this._legacyFaceDeviates(faceRef, legacy)) {
+          const v2 = this.triangulateFaceV2(faceRef, true);
+          if (v2 && v2.length) return v2;
+        }
+      } catch (e) { /* 従来の結果を使う */ }
+      return legacy;
+    }
+    _legacyFaceDeviates(faceRef, tris) {
+      const fbody = this.entities.get(faceRef);
+      if (!fbody || !fbody.startsWith("ADVANCED_FACE(")) return false;
+      const fparts = topLevelSplit(fbody.slice("ADVANCED_FACE(".length, -1));
+      const surfaceRef = refs(fparts[2])[0];
+      if (!surfaceRef) return false;
+      const [kind, frame, radius] = this.getSurfaceFrame(surfaceRef);
+      if (!frame || (kind !== "CYLINDRICAL" && kind !== "CONICAL")) return false;
+      const [origin, , , z] = frame;
+      const radAt = (p) => {
+        const v = vsub(p, origin);
+        const h = vdot(v, z);
+        const r = kind === "CYLINDRICAL" ? radius : radius[0] + h * Math.tan(radius[1]);
+        const d = vsub(v, vscale(z, h));
+        return [Math.sqrt(vdot(d, d)), Math.abs(r)];
+      };
+      for (const t of tris) {
+        const c = vscale(vadd(vadd(t[0], t[2]), t[4]), 1 / 3);
+        const [d, r] = radAt(c);
+        if (r > 1e-6 && Math.abs(r - d) > Math.max(0.05 * r, 0.05)) return true;
+      }
+      return false;
+    }
+    _triangulateFaceBase(faceRef) {
       // v487: 穴のある面・自由曲面は改良版で分割する(扱えない面は従来の方法)
       try { const v2 = this.triangulateFaceV2(faceRef); if (v2 && v2.length) return v2; } catch (e) { /* 従来の方法へ */ }
       const fbody = this.entities.get(faceRef);
@@ -3037,7 +3075,7 @@
 
     // 穴のある面・自由曲面の面を、展開図の上で穴ごと三角形に分けて、曲面上に置く。
     // 対象外の面(穴の無い解析曲面)や、うまく扱えない面は null を返す(従来の方法へ)。
-    triangulateFaceV2(faceRef) {
+    triangulateFaceV2(faceRef, forceAnalytic) {
       const fbody = this.entities.get(faceRef);
       if (!fbody || !fbody.startsWith("ADVANCED_FACE(")) return null;
       const fparts = topLevelSplit(fbody.slice("ADVANCED_FACE(".length, -1));
@@ -3060,7 +3098,7 @@
       if (!loops.length) return null;
       const S = this.surfaceEvaluatorV2(surfaceRef);
       if (!S) return null;
-      if (S.analytic && loops.length < 2) return null; // 穴の無い解析曲面は従来どおり
+      if (S.analytic && loops.length < 2 && !forceAnalytic) return null; // 穴の無い解析曲面は従来どおり
       // 面の大きさ(許容差の基準)
       let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
       for (const L of loops) for (const q of L) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], q[k]); hi[k] = Math.max(hi[k], q[k]); }
@@ -3077,6 +3115,29 @@
           uv.push(t); prev = t;
         }
         uvLoops.push(uv);
+      }
+      // v590: 1本のループが途中で同じ点を2回通る面(穴の縁が継ぎ目で外周に接している円筒面など)は、
+      // その点でループを分け、外周と穴に分けて扱う(そのままだと耳切り法で一部が分割されずに残るため)。
+      if (forceAnalytic) {
+        const tolUV = diag * 1e-6 + 1e-9;
+        const split = [];
+        for (const L of uvLoops) {
+          let cur = [];
+          const stack = [];
+          for (const q of L) {
+            let j = -1;
+            for (let m = 0; m < cur.length; m++) if (Math.abs(cur[m][0] - q[0]) <= tolUV && Math.abs(cur[m][1] - q[1]) <= tolUV) { j = m; break; }
+            if (j >= 0) {
+              const sub = cur.slice(j);
+              if (sub.length >= 3) split.push(sub);
+              cur = cur.slice(0, j);
+            }
+            cur.push(q);
+          }
+          if (cur.length >= 3) split.push(cur);
+        }
+        uvLoops.length = 0;
+        for (const L of split) uvLoops.push(L);
       }
       const area2 = (r) => { let a = 0; for (let i = 0, j = r.length - 1; i < r.length; j = i++) a += (r[j][0] - r[i][0]) * (r[j][1] + r[i][1]); return a / 2; };
       const spanOf = (r, k) => { let a = Infinity, b = -Infinity; for (const q of r) { a = Math.min(a, q[k]); b = Math.max(b, q[k]); } return [a, b]; };
@@ -3130,12 +3191,19 @@
       { const st = 0; for (const q of nOuter) flat.push(q[0], q[1]); rings.push([st, nOuter.length]); }
       for (const h of nHoles) { const st = flat.length / 2; holeIdx.push(st); for (const q of h) flat.push(q[0], q[1]); rings.push([st, h.length]); }
       const curved = isFinite(S.hu) || isFinite(S.hv);
+      const steinerStart = flat.length / 2; // v590: ここから後ろは内側に足した点
       if (curved) {
         const [ua, ub] = spanOf(nOuter, 0), [va, vb] = spanOf(nOuter, 1);
         const dN = _nativeHypot(ub - ua, vb - va);
         let stU = S.analytic ? S.hu * sx : dN / 10, stV = S.analytic ? S.hv * sy : dN / 10;
         if (!isFinite(stU)) stU = Infinity;
         if (!isFinite(stV)) stV = Infinity;
+        // v590: 従来の方法で崩れた円筒・円すい面は、軸方向にも同じ間隔で内側の点を置く
+        // (1列だけだと、境界の点から扇形の細長い三角形ができてしまうため)
+        if (forceAnalytic) {
+          if (!isFinite(stV) && isFinite(stU)) stV = stU;
+          else if (!isFinite(stU) && isFinite(stV)) stU = stV;
+        }
         // 細かすぎないように(内側の点は最大400個程度)
         const cnt = () => (isFinite(stU) ? (ub - ua) / stU : 1) * (isFinite(stV) ? (vb - va) / stV : 1);
         while (cnt() > 400) { stU *= 1.25; stV *= 1.25; }
@@ -3178,8 +3246,130 @@
           }
         }
       }
-      let idx = earcut(flat, holeIdx, 2);
+      // v590: 内側に足した点は耳切り法に渡さない(一直線に並ぶ点がつぶれた三角形になるため)。
+      // 境界だけを三角形に分けてから、下で内側の点を1つずつ入れ、辺の入れ替えで形を整える。
+      let idx = earcut(curved ? flat.slice(0, steinerStart * 2) : flat, curved ? holeIdx.slice(0, nHoles.length) : holeIdx, 2);
       if (!idx.length) return null;
+      // v590: 耳切り法は、展開図で一直線に並ぶ境界の点(円筒の端の円など)を省いてしまう。
+      // 省かれた点を曲面上に置かないと、端の円が多角形(弦)になり、三角形が曲面の内側を横切る。
+      // 省かれた点を、その辺を持つ三角形に扇形に戻してから、下の辺の入れ替えで形を整える。
+      if (curved) {
+        const used = new Uint8Array(flat.length / 2);
+        for (const i of idx) used[i] = 1;
+        const ringOf = new Int32Array(flat.length / 2).fill(-1);
+        rings.forEach(([st, n], r) => { for (let i = 0; i < n; i++) ringOf[st + i] = r; });
+        let missing = false;
+        for (const [st, n] of rings) for (let i = 0; i < n; i++) if (!used[st + i]) { missing = true; break; }
+        if (missing) {
+          // 辺 p→q の間(輪の順で)にある、使われていない点の列
+          const between = (p, q) => {
+            const r = ringOf[p];
+            if (r < 0 || ringOf[q] !== r) return null;
+            const [st, n] = rings[r];
+            const mids = [];
+            for (let k = 1; k < n; k++) {
+              const v = st + ((p - st + k) % n);
+              if (v === q) return mids.length ? mids : null;
+              if (used[v]) return null;
+              mids.push(v);
+            }
+            return null;
+          };
+          const out2 = [];
+          for (let t = 0; t < idx.length; t += 3) {
+            let tri = [idx[t], idx[t + 1], idx[t + 2]];
+            let done = false;
+            for (let e = 0; e < 3 && !done; e++) {
+              const p = tri[e], q = tri[(e + 1) % 3], r = tri[(e + 2) % 3];
+              const m = between(p, q) || (() => { const x = between(q, p); return x ? x.slice().reverse() : null; })();
+              if (!m) continue;
+              const chain = [p].concat(m, [q]);
+              for (let k = 0; k + 1 < chain.length; k++) out2.push([chain[k], chain[k + 1], r]);
+              done = true;
+            }
+            if (!done) out2.push(tri);
+          }
+          // 1つの三角形に省かれた辺が2本以上ある場合に備えて、もう一度くり返す
+          let cur = out2;
+          for (let pass = 0; pass < 2; pass++) {
+            const nx = [];
+            for (const tri of cur) {
+              let done = false;
+              for (let e = 0; e < 3 && !done; e++) {
+                const p = tri[e], q = tri[(e + 1) % 3], r = tri[(e + 2) % 3];
+                const m = between(p, q) || (() => { const x = between(q, p); return x ? x.slice().reverse() : null; })();
+                if (!m) continue;
+                const chain = [p].concat(m, [q]);
+                for (let k = 0; k + 1 < chain.length; k++) nx.push([chain[k], chain[k + 1], r]);
+                done = true;
+              }
+              if (!done) nx.push(tri);
+            }
+            cur = nx;
+          }
+          idx = [];
+          for (const tri of cur) idx.push(tri[0], tri[1], tri[2]);
+        }
+        // v590: 耳切り法は、一直線に並んだ内側の点も省くことがある。省かれた内側の点を、
+        // それを含む三角形を分けて入れ直す(辺の上にあるときは、その辺の両側の三角形を2つずつに分ける)。
+        {
+          const X = (i) => flat[i * 2], Y = (i) => flat[i * 2 + 1];
+          const orient = (a, b, c) => (X(b) - X(a)) * (Y(c) - Y(a)) - (Y(b) - Y(a)) * (X(c) - X(a));
+          const used2 = new Uint8Array(flat.length / 2);
+          for (const i of idx) used2[i] = 1;
+          const nPts = flat.length / 2;
+          let anyMissing = false;
+          for (let i = steinerStart; i < nPts; i++) if (!used2[i]) { anyMissing = true; break; }
+          if (anyMissing) {
+            let T = [];
+            for (let t = 0; t < idx.length; t += 3) {
+              let a = idx[t], b = idx[t + 1], c = idx[t + 2];
+              if (orient(a, b, c) < 0) { const x = b; b = c; c = x; }
+              T.push([a, b, c]);
+            }
+            for (let pnt = steinerStart; pnt < nPts; pnt++) {
+              if (used2[pnt]) continue;
+              let scale = 0;
+              let hit = -1, onEdge = -1;
+              for (let ti = 0; ti < T.length; ti++) {
+                const [a, b, c] = T[ti];
+                const ar = orient(a, b, c);
+                if (!(ar > 0)) continue;
+                const eps = ar * 1e-9;
+                const w0 = orient(b, c, pnt), w1 = orient(c, a, pnt), w2 = orient(a, b, pnt);
+                if (w0 < -eps || w1 < -eps || w2 < -eps) continue;
+                hit = ti;
+                const lim = ar * 1e-7;
+                onEdge = Math.abs(w0) <= lim ? 0 : Math.abs(w1) <= lim ? 1 : Math.abs(w2) <= lim ? 2 : -1;
+                break;
+              }
+              if (hit < 0) continue;
+              const [a, b, c] = T[hit];
+              if (onEdge < 0) {
+                T[hit] = [a, b, pnt]; T.push([b, c, pnt], [c, a, pnt]);
+              } else {
+                // 辺(p,q)の上: 相手の三角形も分ける
+                const tri = T[hit];
+                const p = tri[(onEdge + 1) % 3], q = tri[(onEdge + 2) % 3], r = tri[onEdge];
+                T[hit] = [r, p, pnt]; T.push([r, pnt, q]);
+                for (let tj = 0; tj < T.length; tj++) {
+                  if (tj === hit) continue;
+                  const u = T[tj];
+                  const ip = u.indexOf(p), iq = u.indexOf(q);
+                  if (ip < 0 || iq < 0) continue;
+                  const s2 = u.find((v) => v !== p && v !== q);
+                  if (s2 === pnt) continue;
+                  T[tj] = [s2, q, pnt]; T.push([s2, pnt, p]);
+                  break;
+                }
+              }
+              used2[pnt] = 1;
+            }
+            idx = [];
+            for (const t of T) { let [a, b, c] = t; if (orient(a, b, c) < 0) { const x = b; b = c; c = x; } idx.push(a, b, c); }
+          }
+        }
+      }
       // 辺の入れ替え(制約付きドロネー): 外周・穴の辺は動かさない
       if (curved) {
         const X = (i) => flat[i * 2], Y = (i) => flat[i * 2 + 1];
