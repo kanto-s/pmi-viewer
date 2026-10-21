@@ -1166,7 +1166,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v579</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v580</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1314,6 +1314,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v580: 溶接記号の初期の大きさが小さすぎたため、モデル全体の大きさに合わせた見やすい大きさにしました(「溶接記号のサイズ」でさらに変えられます)。</li>
         <li>v579: 溶接記号をSTEPファイルに記録された元の図形(線・面の座標)のまま描くようにしました。記号本体だけを見やすい大きさにそろえ、引出線と矢の先はファイルの位置のまま動かしません。数字と隅肉の三角形が重なる場合だけ、数字を基線に沿ってずらします。</li>
         <li>v578: サブアセンブリを選んだときや通常の表示でも、照合番号・溶接記号などが互いに避け合って動き続けないようにしました。回転などを止めたら置き場所が落ち着いた時点(最大約0.8秒)で確定し、視点を変えるかマウスで寸法を拡大するまで動かしません。</li>
         <li>v577: 「PMIを一斉表示」のときに、照合番号・溶接記号などが互いに避け合って動き続けていた問題を修正しました。回転などを止めたらすぐ(約0.3〜0.8秒で)置き場所を確定し、視点を変えるまでは動かしません。</li>
@@ -16942,6 +16943,8 @@
   // v14: STEPでテッセレーションされた文字と、閉じた隅肉三角形の衝突だけを
   // 解消する。引出線、基線、溶接指示位置は動かさない。
   // 幾何的に三角形を特定できない場合は元のSTEP図形を保持する。
+  const WELD_FAITHFUL_TARGET_MM = 44;      // v580: 溶接記号(STEPの元図形)の初期の大きさの下限(mm)
+  const WELD_FAITHFUL_TARGET_RATIO = 0.16; // v580: モデルの外接箱の対角に対する、記号本体の大きさの目安
   function separateRecordedWeldDigits(pmi, leaderIndex, scale) {
     const lines=pmi.lines||[], tris=pmi.tris||[];
     if (!lines.length || !tris.length) return;
@@ -17647,7 +17650,13 @@
                 for(const q of symbolPts)for(let j=0;j<3;j++) {lo[j]=Math.min(lo[j],q[j]);hi[j]=Math.max(hi[j],q[j]);}
                 const extent=Math.max(...hi.map((v,j)=>v-lo[j]));
                 // 初期の共通目標を22mmに引き上げる。ファイル単位の倍率は持たない。
-                if(Number.isFinite(extent)&&extent>0.1) k=userScale*Math.max(0.3,Math.min(5,22/extent));
+                if(Number.isFinite(extent)&&extent>0.1) {
+                  // v580: 目安の大きさを固定の22mmにしていたため、記号が元の大きさの3割ほどまで縮んで小さすぎた。
+                  // モデル全体の大きさ(外接箱の対角)の約16%を目安にする(画面いっぱいに表示したとき、どのファイルでも同じくらいに見える)。
+                  const diag=Math.hypot(bboxMax[0]-bboxMin[0],bboxMax[1]-bboxMin[1],bboxMax[2]-bboxMin[2]);
+                  const target=(Number.isFinite(diag)&&diag>0)?Math.min(600,Math.max(WELD_FAITHFUL_TARGET_MM,diag*WELD_FAITHFUL_TARGET_RATIO)):WELD_FAITHFUL_TARGET_MM;
+                  k=userScale*Math.max(0.2,Math.min(8,target/extent));
+                }
               }
               const sc=q=>[joint[0]+(q[0]-joint[0])*k,joint[1]+(q[1]-joint[1])*k,joint[2]+(q[2]-joint[2])*k];
               // 引出線・矢先端・矢尻のメッシュは原座標に固定する。
