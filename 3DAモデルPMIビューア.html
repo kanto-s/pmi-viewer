@@ -1170,7 +1170,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v592</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v593</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1318,6 +1318,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v593: 溶接記号が表示されていない(指示線がモデルの上を通るため隠した・件数制限・裏側などで非表示になっている)箇所では、継ぎ目のハイライトを出さないようにしました。実際に画面に出ている溶接記号の継ぎ目だけを明るく描きます。</li>
         <li>v592: 四角の枠の照合番号の正方形を、それぞれの数字の大きさにぴったり合わせるようにしました(「2」は小さな正方形、「10」は少し大きな正方形)。</li>
         <li>v591: 四角の枠の照合番号(「10」「2」など)を、縦横比が同じ正方形の枠で表示するようにしました。</li>
         <li>v590: T字エルボ(ティー)の付け根がピラミッドのように尖って見えたり、エルボの曲面がギザギザに見えたり、バルブのハンドルが円板のように塗りつぶされて見えたりしていた問題を修正しました。曲面を三角形に分けるとき、円筒の端の円などの境界の点や内側の点が一部省かれ、三角形が曲面の内側を横切っていたためです。省かれた点を曲面の上に戻し、ほかの配管と同じようになめらかに表示します。</li>
@@ -22282,13 +22283,10 @@ pmi._lineFarPoint = null;
       // マゼンタの太い線に、暗い縁取りを付けて描く(どの色の配管の上でも、どの角度からでも目立つように)。
       // 表示しているすべての溶接記号について描き、選んだ溶接記号はさらに太くし、モデルの陰になる部分も薄く透かして描く。
       if (gl && pmiList && pmiList.length) {
-        const shownW = pmiList.filter((p) => {
-          if (p.category !== 'weld' || !p._modelAttachmentPoint || p._markerOccluded) return false;
-          if (p.id === selectedId) return true;
-          if (!isCategoryVisible(p)) return false;
-          const el = markerEls.get(p.id);
-          return p._faithfulStepWeld ? true : (!!el && el.style.display !== 'none');
-        });
+        // v593: 溶接記号が実際に画面に出ているものだけ継ぎ目をハイライトする(非表示の溶接記号はハイライトしない)。
+        // 表示・非表示はこのコマの後半(指示線がモデルの上を通るときの非表示・件数制限・重なり判定など)で決まるので、
+        // 直前のコマの最後に確かめた結果(_weldSeamShown)を使う。変わったときはすぐ次のコマを描くので遅れは見えない。
+        const shownW = pmiList.filter((p) => p.category === 'weld' && p._modelAttachmentPoint && p._weldSeamShown && isCategoryVisible(p));
         if (shownW.length) {
           const px = 2 / Math.max(1, canvas.width), py = 2 / Math.max(1, canvas.height);
           const dpr = window.devicePixelRatio || 1;
@@ -24850,6 +24848,21 @@ pmi._lineFarPoint = null;
         }
       }
     }
+    // v593: このコマで溶接記号が実際に表示されたかを記録する(継ぎ目のハイライトはこれを見て描く)
+    try {
+      let seamChanged = false;
+      for (const p of pmiList) {
+        if (p.category !== 'weld') continue;
+        let sh = isCategoryVisible(p) && !p._markerOccluded && !p._farOccluded && !p._noModelLeader;
+        if (sh && !p._faithfulStepWeld) {
+          const el = markerEls.get(p.id);
+          // 指示線がモデルの上を通るため隠した溶接記号(visibility: hidden)や、画面外の溶接記号もハイライトしない
+          sh = !!el && el.style.display !== 'none' && el.style.visibility !== 'hidden' && el.style.opacity !== '0' && !p._leaderCrossHidden;
+        }
+        if (!!p._weldSeamShown !== sh) { p._weldSeamShown = sh; seamChanged = true; }
+      }
+      if (seamChanged) markRenderActive(120);
+    } catch (e) { /* 次のコマで */ }
     try { updatePmiFades(); } catch (e) { console.warn('updatePmiFades failed:', e); }
     restorePmiGhosts();
     requestAnimationFrame(render);
