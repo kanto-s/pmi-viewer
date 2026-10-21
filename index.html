@@ -1170,7 +1170,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v596</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v597</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1318,6 +1318,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v597: 「PMIを一斉表示」のときは、照合番号・注記・溶接記号をモデルの外側(左右・上下の余白)に一列にそろえて並べ、指示線で結ぶようにしました。番号・記号どうしが重ならず、同じ列の指示線どうしは交差しません。</li>
         <li>v596: 「PMIを一斉表示」のときに動作が重くなる問題を軽くしました。溶接記号の継ぎ目の色を決めるための画面の読み取りを、毎コマではなく視点が変わったときだけにし、置き場所の重なり判定で、明らかに離れているものを先に除くようにしました(表示結果は同じ)。</li>
         <li>v595: 照合番号・注記・溶接記号の指示線どうしが交差する(たすき掛けに指す)ときは、2つの置き場所を入れ替えて、それぞれ近い側から指すようにしました。</li>
         <li>v594: 文字が多く横に長い四角の注記(「F3 B4 G5」など)は、正方形ではなく文字に合わせた長方形の枠で描くようにしました(照合番号のような短い数字はこれまでどおり正方形)。</li>
@@ -8754,6 +8755,7 @@
   // (遮蔽判定・正面/側面の振り分け・カメラに近い5個だけの制限)をすべて
   // 無視して、種類の表示/非表示チェック・エリア絞り込みだけを見る。
   let showAllAtOnce = false;
+  let showAllPrevView = null; // v597: 一斉表示にする前の見え方
   // v401: 角度に応じて表示する寸法の割合(1 = すべて)。
   let dimThinRatio = 0.3334;
   // v405: 表示する寸法の数を自動で決める(既定)。画面上で寸法値どうしが
@@ -9610,11 +9612,11 @@
     return { availFrac, ndcXOffset, ndcYOffset };
   }
 
-  function fitToView(keepRotation) {
+  function fitToView(keepRotation, marginMul) {
     const rot = keepRotation ? sceneRotation : defaultIsoRotation();
     const { availFrac, ndcXOffset, ndcYOffset } = getRibbonFraming();
     const visibleHalfHeight = CAMERA_DIST * Math.tan(VFOV / 2) * availFrac;
-    const margin = 0.72;
+    const margin = 0.72 * (marginMul || 1); // v597: 一斉表示のときは周りに番号を並べる余白を空けるため小さめに
     const scale = (visibleHalfHeight * margin) / boundsRadius;
     // translation places (rotated & scaled) boundsCenter at world origin
     const rotMat = mat4FromQuat(rot);
@@ -15155,6 +15157,18 @@
   });
   document.getElementById('showAllAtOnceBtn').addEventListener('click', (e) => {
     showAllAtOnce = !showAllAtOnce;
+    // v597: 一斉表示では番号・記号をモデルの外側に並べるので、今の向きのままモデルを小さめに表示して周りに余白を作る。
+    // 解除したら、一斉表示にする前の見え方に戻す。
+    try {
+      if (showAllAtOnce) {
+        showAllPrevView = { r: { ...sceneRotation }, s: sceneScale, t: { ...sceneTranslation } };
+        fitToView(true, (() => { const n = pmiList.filter((q) => (q.category === 'note' || q.category === 'weld') && isCategoryVisible(q) && (typeof occPmiVisibleSafe !== 'function' || occPmiVisibleSafe(q))).length; return Math.max(0.4, Math.min(0.7, 0.7 - (n - 20) * 0.008)); })());
+      } else if (showAllPrevView) {
+        sceneRotation = showAllPrevView.r; sceneScale = showAllPrevView.s; sceneTranslation = showAllPrevView.t;
+        showAllPrevView = null;
+      }
+      markRenderActive(800);
+    } catch (err) { /* そのまま */ }
     // v576: 一斉表示にしたら、照合番号と重なるために隠していた寸法(B案)をすべて戻す
     if (showAllAtOnce) { for (const q of pmiList) q._dimNoteHide = null; try { markRenderActive(300); } catch (err) { /* 次のコマで反映 */ } }
     e.currentTarget.textContent = showAllAtOnce ? 'PMIを一斉表示(解除)' : 'PMIを一斉表示';
@@ -20460,6 +20474,168 @@ pmi._lineFarPoint = null;
       if (el) { el.style.left = nx + 'px'; el.style.top = ny + 'px'; }
     }
   }
+  // v597: 「PMIを一斉表示」のときは、照合番号・注記・溶接記号をモデルの外側(左右・上下の余白)に一列にそろえて
+  // 並べ、指示線で結ぶ(図面の照合番号の並べ方)。指している点の向き(モデルの中心から見た方向)で並べる辺を決め、
+  // 辺ごとに指している点の順に並べるので、同じ辺の指示線どうしは交差しない。番号・記号どうしは重ならない。
+  function perimeterLayoutAll(allScreenPmis, mvp) {
+    if (!showAllAtOnce) return;
+    const cover = getScreenCover(mvp);
+    const cw = cvSize().w, ch = cvSize().h;
+    const top0 = Math.max(8, getRibbonHeightPx() + 8), left0 = 8, right0 = cw - 8, bottom0 = ch - 8;
+    let mx0 = Infinity, mx1 = -Infinity, my0 = Infinity, my1 = -Infinity;
+    // モデルが画面に写っている範囲: モデルの頂点を間引いて投影して求める(細い配管も見落とさない)
+    void cover;
+    {
+      const T = (occView !== 'all' && occSelected >= 0) ? modelOcclusionTris : modelAllTris;
+      if (T && T.length) {
+        const nV = T.length / 3, step = Math.max(1, Math.floor(nV / 6000));
+        for (let v = 0; v < nV; v += step) {
+          const q = project(mvp, [T[v * 3], T[v * 3 + 1], T[v * 3 + 2]]);
+          if (!q) continue;
+          if (q.x < mx0) mx0 = q.x; if (q.x > mx1) mx1 = q.x; if (q.y < my0) my0 = q.y; if (q.y > my1) my1 = q.y;
+        }
+      }
+    }
+    const items = [];
+    for (const p of allScreenPmis) {
+      if (!(p.category === 'note' || p.category === 'weld') || p.asRecorded || !p._screen || p._noModelLeader) continue;
+      if (!isCategoryVisible(p) || tableGridAxes(p)) continue;
+      const el = markerEls.get(p.id);
+      if (!el || el.style.display === 'none') continue;
+      const oL = leaderModelPoint(p);
+      const O = oL ? project(mvp, oL) : null;
+      const g = measureTagCenterOffset(p);
+      if (!O || !g || !(g.w > 0)) continue;
+      items.push({ p, O, g });
+    }
+    if (!items.length) return;
+    if (!(mx1 > mx0)) { mx0 = Math.min(...items.map((i) => i.O.x)); mx1 = Math.max(...items.map((i) => i.O.x)); my0 = Math.min(...items.map((i) => i.O.y)); my1 = Math.max(...items.map((i) => i.O.y)); }
+    const cx = (mx0 + mx1) / 2, cy = (my0 + my1) / 2;
+    const hw = Math.max(20, (mx1 - mx0) / 2), hh = Math.max(20, (my1 - my0) / 2);
+    const GAP = 24, SP = 6;
+    // 部品表の欄など、置けない所
+    const banned = [];
+    { const d = getPartsTableDockRect(); if (d) banned.push(d); }
+    { const b = getBomDrawerRect(); if (b) banned.push(b); }
+    const sides = { left: [], right: [], top: [], bottom: [] };
+    // v597: 縦の列(左右)を優先する(番号が縦にそろって読みやすく、指示線も交差しにくい)。
+    // 列に入りきらないときだけ、上下の端に近いものから上・下の行へ回す。
+    const colCap = (isLeft) => {
+      let lo = top0, hi = bottom0;
+      const wE = Math.max(...items.map((it) => it.g.w));
+      const xs = isLeft ? [mx0 - GAP - wE, mx0 - GAP] : [mx1 + GAP, mx1 + GAP + wE];
+      for (const b of banned) if (xs[1] > b.x0 && xs[0] < b.x1) { if (b.y0 > (top0 + bottom0) / 2) hi = Math.min(hi, b.y0 - 8); else lo = Math.max(lo, b.y1 + 8); }
+      return Math.max(0, hi - lo);
+    };
+    const roomL = mx0 - left0 - GAP, roomR = right0 - mx1 - GAP;
+    for (const it of items) {
+      const dx = (it.O.x - cx) / hw;
+      let side = dx < 0 ? 'left' : 'right';
+      if (side === 'left' && roomL < it.g.w && roomR >= it.g.w) side = 'right';
+      if (side === 'right' && roomR < it.g.w && roomL >= it.g.w) side = 'left';
+      if (roomL < it.g.w && roomR < it.g.w) side = it.O.y < cy ? 'top' : 'bottom';
+      it.side = side; sides[side].push(it);
+    }
+    const wE0 = Math.max(...items.map((it) => it.g.w));
+    const colLines = (isLeft) => Math.max(1, Math.min(3, Math.floor(((isLeft ? roomL : roomR) + GAP) / (wE0 + GAP))));
+    // 上下の行を使うときは、その行の高さぶん列を短くする(列と行が重ならないように)
+    const hAll = Math.max(...items.map((it) => it.g.h));
+    let rowTopY1 = top0, rowBotY0 = bottom0;
+    for (let pass = 0; pass < 3; pass++) {
+      rowTopY1 = sides.top.length ? Math.max(top0, my0 - GAP - hAll) + hAll + SP : top0;
+      rowBotY0 = sides.bottom.length ? Math.min(bottom0, my1 + GAP + hAll) - hAll - SP : bottom0;
+      for (const sd of ['left', 'right']) {
+        const cap = Math.min(colCap(sd === 'left'), rowBotY0 - rowTopY1) * colLines(sd === 'left');
+        const list = sides[sd];
+        let tot = list.reduce((acc, it) => acc + it.g.h + SP, 0);
+        if (tot <= cap) continue;
+        list.sort((p1, p2) => Math.abs(p2.O.y - cy) - Math.abs(p1.O.y - cy));
+        while (list.length && tot > cap) { const it = list.shift(); tot -= it.g.h + SP; it.side = it.O.y < cy ? 'top' : 'bottom'; sides[it.side].push(it); }
+      }
+    }
+    // 1列(辺)の中で、指している点の位置を目安に並べ、重ならないように押し広げる
+    const pack = (list, key, size, lo, hi) => {
+      list.sort((a, b) => a.O[key] - b.O[key]);
+      const pos = list.map((it) => Math.min(hi - size(it) / 2, Math.max(lo + size(it) / 2, it.O[key])));
+      for (let k = 1; k < list.length; k++) { const need = pos[k - 1] + size(list[k - 1]) / 2 + SP + size(list[k]) / 2; if (pos[k] < need) pos[k] = need; }
+      // v597: 押し広げた束を、指している点の平均の位置に中心をそろえる(片側へ伸びて指示線が長くならないように)
+      if (list.length > 1) {
+        const mO = list.reduce((a, it) => a + it.O[key], 0) / list.length, mP = pos.reduce((a, v) => a + v, 0) / pos.length;
+        let sh = mO - mP;
+        sh = Math.max(sh, lo + size(list[0]) / 2 - pos[0]);
+        for (let k = 0; k < pos.length; k++) pos[k] += sh;
+        for (let k = 0; k < pos.length; k++) pos[k] = Math.max(pos[k], lo + size(list[k]) / 2);
+      }
+      if (list.length && pos[list.length - 1] + size(list[list.length - 1]) / 2 > hi) {
+        pos[list.length - 1] = hi - size(list[list.length - 1]) / 2;
+        for (let k = list.length - 2; k >= 0; k--) { const lim = pos[k + 1] - size(list[k + 1]) / 2 - SP - size(list[k]) / 2; if (pos[k] > lim) pos[k] = lim; }
+      }
+      return pos;
+    };
+    // 左右の列は、列の幅(一番広い記号)にそろえて縦に並べる
+    // v597: 上の行と下の行で、入る量に合わせて振り分ける(入りきらない側から反対側へ回す)
+    const rowW = (isTop) => {
+      const y = isTop ? my0 - GAP - hAll / 2 : my1 + GAP + hAll / 2;
+      let lo = left0, hi = right0;
+      for (const b of banned) if (y + hAll / 2 > b.y0 && y - hAll / 2 < b.y1) { if (b.x0 > (left0 + right0) / 2) hi = Math.min(hi, b.x0 - 8); else lo = Math.max(lo, b.x1 + 8); }
+      return Math.max(0, hi - lo);
+    };
+    const rowLinesCap = (isTop) => Math.max(1, Math.floor(((isTop ? my0 - GAP - top0 : bottom0 - my1 - GAP) + SP) / (hAll + SP)));
+    const rowCapT = rowW(true) * rowLinesCap(true), rowCapB = rowW(false) * rowLinesCap(false);
+    {
+      const sumW = (l) => l.reduce((acc, it) => acc + it.g.w + SP, 0);
+      let tT = sumW(sides.top), tB = sumW(sides.bottom);
+      if (tT > rowCapT) { sides.top.sort((p1, p2) => p2.O.y - p1.O.y); while (sides.top.length && tT > rowCapT && tB + sides.top[0].g.w <= rowCapB) { const it = sides.top.shift(); tT -= it.g.w + SP; tB += it.g.w + SP; it.side = 'bottom'; sides.bottom.push(it); } }
+      if (tB > rowCapB) { sides.bottom.sort((p1, p2) => p1.O.y - p2.O.y); while (sides.bottom.length && tB > rowCapB && tT + sides.bottom[0].g.w <= rowCapT) { const it = sides.bottom.shift(); tB -= it.g.w + SP; tT += it.g.w + SP; it.side = 'top'; sides.top.push(it); } }
+    }
+    const placeCol = (list, isLeft) => {
+      if (!list.length) return;
+      const wMax = Math.max(...list.map((it) => it.g.w));
+      const tot = list.reduce((acc, it) => acc + it.g.h + SP, 0);
+      const L = Math.max(1, Math.min(colLines(isLeft), Math.ceil(tot / Math.max(60, rowBotY0 - rowTopY1))));
+      list.sort((p1, p2) => p1.O.y - p2.O.y);
+      for (let l = 0; l < L; l++) {
+        const line = list.filter((_, i) => i % L === l);
+        const off = l * (wMax + GAP);
+        const xC = isLeft ? Math.max(left0 + wMax / 2, mx0 - GAP - wMax / 2 - off) : Math.min(right0 - wMax / 2, mx1 + GAP + wMax / 2 + off);
+        let lo = rowTopY1, hi = rowBotY0;
+        for (const b of banned) if (xC + wMax / 2 > b.x0 && xC - wMax / 2 < b.x1) { if (b.y0 > (top0 + bottom0) / 2) hi = Math.min(hi, b.y0 - 8); else lo = Math.max(lo, b.y1 + 8); }
+        const pos = pack(line, 'y', (it) => it.g.h, lo, hi);
+        line.forEach((it, k) => { it.C = { x: isLeft ? xC + (wMax - it.g.w) / 2 : xC - (wMax - it.g.w) / 2, y: pos[k] }; });
+      }
+    };
+    const placeRow = (list, isTop) => {
+      if (!list.length) return;
+      const hMax = hAll;
+      // v597: 1行に入りきらないときは、外側(上なら更に上、下なら更に下)へ行を増やす
+      const base = isTop ? Math.max(top0 + hMax / 2, my0 - GAP - hMax / 2) : Math.min(bottom0 - hMax / 2, my1 + GAP + hMax / 2);
+      const tot = list.reduce((acc, it) => acc + it.g.w + SP, 0);
+      const span0 = right0 - left0;
+      const L = Math.max(1, Math.min(rowLinesCap(isTop), Math.ceil(tot / Math.max(100, rowW(isTop)))));
+      list.sort((p1, p2) => p1.O.x - p2.O.x);
+      for (let l = 0; l < L; l++) {
+        const line = list.filter((_, i) => i % L === l);
+        let yC = isTop ? base - l * (hMax + SP) : base + l * (hMax + SP);
+        yC = Math.min(bottom0 - hMax / 2, Math.max(top0 + hMax / 2, yC));
+        let lo = left0, hi = right0;
+        for (const b of banned) if (yC + hMax / 2 > b.y0 && yC - hMax / 2 < b.y1) { if (b.x0 > (left0 + right0) / 2) hi = Math.min(hi, b.x0 - 8); else lo = Math.max(lo, b.x1 + 8); }
+        const pos = pack(line, 'x', (it) => it.g.w, lo, hi);
+        line.forEach((it, k) => { it.C = { x: pos[k], y: isTop ? yC + (hMax - it.g.h) / 2 : yC - (hMax - it.g.h) / 2 }; });
+      }
+    };
+    placeCol(sides.left, true); placeCol(sides.right, false); placeRow(sides.top, true); placeRow(sides.bottom, false);
+    for (const it of items) {
+      if (!it.C) continue;
+      const p = it.p;
+      const nx = it.C.x - it.g.offX, ny = it.C.y - it.g.offY;
+      p._screen.x = nx; p._screen.y = ny;
+      if (p._naturalScreenX != null) { p._declutterDX = nx - p._naturalScreenX; p._declutterDY = ny - p._naturalScreenY; }
+      if (p._anchorScreen) { p._noteRelDX = nx - p._anchorScreen.x; p._noteRelDY = ny - p._anchorScreen.y; p._notePend = null; }
+      p._perimeterPlaced = true;
+      const el = markerEls.get(p.id);
+      if (el) { el.style.left = nx + 'px'; el.style.top = ny + 'px'; }
+    }
+  }
   function noteDimOverlapSweep(allScreenPmis, mvp) {
     if (showAllAtOnce) return; // v576: 「PMIを一斉表示」中は照合番号と重なっても寸法を隠さない(全部出す)
     if (isUserViewMoving(performance.now())) return;
@@ -23761,7 +23937,8 @@ pmi._lineFarPoint = null;
       try { weldFinalLeaderCheck(allScreenPmis, mvp); } catch (err) { console.warn('溶接記号の指示線の最終確認に失敗しました', err); }
       // v543: 照合番号などの注記が、寸法線・寸法補助線・寸法値に重なったまま残らないよう、最終位置で確かめてずらす
       try { noteFinalDimCheck(allScreenPmis, mvp); } catch (err) { console.warn('注記と寸法の重なりの最終確認に失敗しました', err); }
-      try { leaderCrossSwap(allScreenPmis, mvp); } catch (err) { console.warn('指示線の交差の入れ替えに失敗しました', err); } // v595
+      if (showAllAtOnce) { try { perimeterLayoutAll(allScreenPmis, mvp); } catch (err) { console.warn('外周への整列に失敗しました', err); } } // v597
+      else { try { leaderCrossSwap(allScreenPmis, mvp); } catch (err) { console.warn('指示線の交差の入れ替えに失敗しました', err); } } // v595
       // v527: 注記・溶接記号の置き場所の変化をなめらかに(目標位置へ少しずつ近づける)
       // v530: 動き方を自然に。(1) 指示線の先(指している点)を中心に、角度と距離に分けて動かす
       // (反対側へ移るときに指している点の上を素通りせず、指示線の長さを保ったまま弧を描いて回り込む)
@@ -23964,7 +24141,14 @@ pmi._lineFarPoint = null;
               }
               // v421: 矢が水平に近いと基線と一直線になり「角度をもって連結」にならないので、
               // 記号を上下にずらして矢に20°以上の角度を付ける(ずらす量は最大80px)。
-              if (pmi.weldSym) {
+              // v597: 一斉表示で外周にそろえて並べたときは、記号の上下ずらしをしない(列・行の位置がずれて重なるため)
+              if (pmi.weldSym && showAllAtOnce && pmi._perimeterPlaced) {
+                if (pmi._weldShiftY) {
+                  targetY -= pmi._weldShiftY; pmi._weldShiftY = 0;
+                  const wtag = markerEls.get(pmi.id).querySelector('.weld-notation');
+                  if (wtag) { const k = weldNotationScale(); wtag.style.transform = (pmi._weldShiftPx ? 'translate(' + (pmi._weldShiftPx * k).toFixed(1) + 'px,0px) ' : '') + 'scale(' + k + ')'; }
+                }
+              } else if (pmi.weldSym) {
                 const prevY = pmi._weldShiftY || 0;
                 const kneeNatY = targetY - prevY;
                 const adx = Math.abs(modelScreen.x - targetX), dyNat = modelScreen.y - kneeNatY;
@@ -24053,7 +24237,7 @@ pmi._lineFarPoint = null;
           }
           // v583: 指示線がモデルの上を通る(画面上でモデルを貫通して見える)ときは、そのPMI(番号・溶接記号と
           // 指示線)をこの向きでは表示しない。指している点のすぐ手前(モデルの外形に触れるところ)は数えない。
-          if (!showAllAtOnce || true) {
+          if (!showAllAtOnce) { // v597: 一斉表示のときは外周に並べるので、指示線がモデルの上を通っても隠さない
             let crosses = false;
             try {
               const cov = getScreenCover(mvp);
