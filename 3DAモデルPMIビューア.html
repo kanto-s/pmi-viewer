@@ -1171,7 +1171,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v618</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v619</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1319,6 +1319,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v619: 「PMIを一斉表示」で、1つずつ動かしても解けない指示線の交差・指示線と記号のかぶりは、かぶっている2つを同時に動かして解くようにしました。</li>
         <li>v618: 「PMIを一斉表示」で、指示線がほかの記号に少しでもかかる(7px以内を通る)置き方を避けるようにしました。溶接記号は、真横からではなく斜め上下から指すように置きます。</li>
         <li>v617: 「PMIを一斉表示」の仕上げを追加しました。並べたあと、実際に描かれる指示線で、記号がモデル・寸法値の上にないか、指示線がモデル・寸法値・寸法線の上を通らないか、指示線どうしが交差しないか、指示線がほかの記号に触れないかを調べ、かぶっているものや指示線が長いものは、指している所の近くの空いている所(ほかのどれともかぶらない所)へ移します。交差は特に重く数え、たすき掛けの2つは置き場所を入れ替えます。指している点がモデルの絵の内側にあるときは、外へ出るまでの最短の長さだけはモデルの上を通ってもよいことにしました。</li>
         <li>v616: 「PMIを一斉表示」で、PMIを四角の枠の4辺のうち、指示線が辺に直角(列なら水平、行なら垂直)に近く、かつ短くなる辺に置くようにしました。枠を大きくする前に番号・記号を少し小さくし、間隔を詰めて、枠とモデルのあいだが空きすぎないようにしました。外側に2重目の列は作らず、置けなかったものも必ず空いている所へ置きます。モデルの内側の空き(L字の所など)は5か所まで使います。</li>
@@ -22043,6 +22044,46 @@ pmi._lineFarPoint = null;
           A.C = ca; B.C = cb; A.S = startOf(A, A.C); B.S = startOf(B, B.C);
         }
         if (!sw) break;
+      }
+      // v619: それでも残るかぶりは、かぶっている2つを同時に動かして解く(1つずつでは解けない込み合った所のため)
+      const tJ = performance.now() + 900;
+      for (let round = 0; round < 3 && performance.now() < tJ; round++) {
+        let fixed = false;
+        const L = live();
+        const pairs = [];
+        for (let a = 0; a < L.length; a++) for (let b = a + 1; b < L.length; b++) if (pairBad(L[a], L[a].C, L[a].S, L[b])) pairs.push([L[a], L[b]]);
+        if (!pairs.length) break;
+        for (const [A, B] of pairs) {
+          if (performance.now() > tJ) break;
+          if (!pairBad(A, A.C, A.S, B)) continue;
+          const others = L.filter((o) => o !== A && o !== B);
+          const before = badAt(A, A.C, L) + badAt(B, B.C, L);
+          const ca = A.C, cb = B.C;
+          // Aの候補(B以外とのかぶりが少ない順)を少し選び、それぞれに対してBの一番良い所を探す
+          const candA = nearCands(A, 360).map((C) => ({ C, b: badAt(A, C, others), l: lenAt(A, C) })).filter((x) => x.b < 6).sort((p1, p2) => p1.b - p2.b || p1.l - p2.l).slice(0, 12);
+          candA.unshift({ C: ca, b: 0, l: 0 });
+          let best = null, bestV = before;
+          for (const xa of candA) {
+            if (performance.now() > tJ) break;
+            A.C = xa.C; A.S = startOf(A, A.C);
+            const withA = others.concat([A]);
+            for (const C of nearCands(B, 360)) {
+              const vb = badAt(B, C, withA);
+              if (vb + xa.b >= bestV) continue;
+              B.C = C; B.S = startOf(B, C);
+              const va = badAt(A, A.C, others.concat([B]));
+              const tot = va + vb;
+              if (tot < bestV - 0.5 || (tot === bestV && best && lenAt(A, A.C) + lenAt(B, C) < best.len)) { bestV = tot; best = { a: A.C, b: C, len: lenAt(A, A.C) + lenAt(B, C) }; }
+              B.C = cb; B.S = startOf(B, cb);
+              if (bestV === 0) break;
+            }
+            if (bestV === 0) break;
+          }
+          if (best && bestV < before) { A.C = best.a; B.C = best.b; A.kind = 'N'; B.kind = 'N'; fixed = true; }
+          else { A.C = ca; B.C = cb; }
+          A.S = startOf(A, A.C); B.S = startOf(B, B.C);
+        }
+        if (!fixed) break;
       }
     }
     perimMatchCache = { key, C: new Map(items.filter((it) => it.C).map((it) => [it.p.id, it.C])) };
