@@ -1171,7 +1171,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v620</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v621</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1319,6 +1319,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v621: サブアセンブリを選んで「周りを薄く」表示にしたとき、周りの部品が白っぽい半透明になり、注記(白)と同じような色で見分けにくかった問題を修正しました。周りの部品は、STEPに入っている部品の色・背景色・PMIの色(注記・寸法・溶接記号)・強調の色のどれとも違う色(モデルごとに、部品の色合いから最も離れた見分けやすい色。例: 青・黄・緑の配管なら赤茶系)の半透明で表示し、縁が白く光らないようにしました。</li>
         <li>v620: 「PMIを一斉表示」で、溶接記号の矢の先を、溶接の継ぎ目(輪)のうち記号の側から見えている点にするようにしました(反対側を指して矢と指示線がモデルを貫通して見えていたため)。</li>
         <li>v619: 「PMIを一斉表示」で、1つずつ動かしても解けない指示線の交差・指示線と記号のかぶりは、かぶっている2つを同時に動かして解くようにしました。</li>
         <li>v618: 「PMIを一斉表示」で、指示線がほかの記号に少しでもかかる(7px以内を通る)置き方を避けるようにしました。溶接記号は、真横からではなく斜め上下から指すように置きます。</li>
@@ -8916,6 +8917,7 @@
     uniform vec3 uLightDir;
     uniform vec3 uViewDir;
     uniform float uAlpha; // v398: 「周りを薄く表示」用の不透明度
+    uniform float uGhost; // v621: 1なら「周りを薄く」の薄い部品(縁を白くしない)
     void main() {
       vec3 n = normalize(vNormalWorld);
       vec3 v = normalize(uViewDir);
@@ -8924,13 +8926,16 @@
       float lighting = 0.38 + 0.56 * diff;
       vec3 base = mix(uColor, vColor, uUseVColor) * lighting;
       vec3 withRim = mix(base, vec3(1.0), rim * 0.35);
-      gl_FragColor = vec4(withRim, uAlpha);
+      // v621: 薄い部品は縁を白く光らせると白っぽく見えて注記(白)とまぎれるため、
+      // 白へは寄せず、色そのものの明るさで縁を少しだけ強める
+      vec3 ghostCol = uColor * (0.70 + 0.30 * diff) * (1.0 + rim * 0.6);
+      gl_FragColor = vec4(mix(withRim, ghostCol, uGhost), uAlpha);
     }
   `;
 
   let uLineAlphaLoc;
   let lineProgram, uModelLoc, uViewLoc, uProjLoc, uColorLoc, uDepthBiasLoc, aPositionLoc, uNdcShiftLoc;
-  let faceProgram, fuModelLoc, fuViewLoc, fuProjLoc, fuColorLoc, fuLightLoc, fuViewDirLoc, faPositionLoc, faNormalLoc, fuAlphaLoc, faColorLoc, fuUseVColorLoc;
+  let faceProgram, fuModelLoc, fuViewLoc, fuProjLoc, fuColorLoc, fuLightLoc, fuViewDirLoc, faPositionLoc, faNormalLoc, fuAlphaLoc, faColorLoc, fuUseVColorLoc, fuGhostLoc;
   if (gl) {
     lineProgram = createProgram(LINE_VS, LINE_FS);
     uModelLoc = gl.getUniformLocation(lineProgram, 'uModel');
@@ -8954,8 +8959,68 @@
     faNormalLoc = gl.getAttribLocation(faceProgram, 'aNormal');
     faColorLoc = gl.getAttribLocation(faceProgram, 'aColor');
     fuUseVColorLoc = gl.getUniformLocation(faceProgram, 'uUseVColor');
+    fuGhostLoc = gl.getUniformLocation(faceProgram, 'uGhost'); // v621
   }
 
+  // v621: 「周りを薄く」の薄い部品の色を選ぶ。STEPの部品の色・PMIや強調の色(寸法の青、溶接記号の橙、
+  // 選択の緑、指示面のマゼンタなど)の「色合い(色相)」を色の輪の上に並べ、どの色からも一番離れた
+  // 色合いを選ぶ(見た目の色の差に近い OKLCH 色空間で計算)。白・灰色・背景のような色味の無い色とは、
+  // はっきりした色を使うことで区別する(注記の白と同じに見えないように)。
+  function srgbToLin(u) { return u <= 0.04045 ? u / 12.92 : Math.pow((u + 0.055) / 1.055, 2.4); }
+  function linToSrgb(u) { return u <= 0.0031308 ? 12.92 * u : 1.055 * Math.pow(u, 1 / 2.4) - 0.055; }
+  function rgb01ToOklch(c) {
+    const r = srgbToLin(c[0]), g = srgbToLin(c[1]), b = srgbToLin(c[2]);
+    const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+    const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+    const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+    const L = 0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s;
+    const A = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s;
+    const B = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s;
+    return [L, Math.hypot(A, B), (Math.atan2(B, A) * 180 / Math.PI + 360) % 360];
+  }
+  function oklchToRgb01(L, C, H) {
+    const h = H * Math.PI / 180, A = C * Math.cos(h), B = C * Math.sin(h);
+    const l = Math.pow(L + 0.3963377774 * A + 0.2158037573 * B, 3);
+    const m = Math.pow(L - 0.1055613458 * A - 0.0638541728 * B, 3);
+    const s = Math.pow(L - 0.0894841775 * A - 1.2914855480 * B, 3);
+    const r = 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
+    const g = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
+    const b = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s;
+    return [r, g, b].map((v) => Math.min(1, Math.max(0, linToSrgb(v))));
+  }
+  function pickOccGhostColor(vcolors) {
+    const hues = [];
+    const seen = new Set();
+    const addRef = (c, w) => {
+      const k = (Math.round(c[0] * 31) << 10) | (Math.round(c[1] * 31) << 5) | Math.round(c[2] * 31);
+      if (seen.has(k)) return; seen.add(k);
+      const o = rgb01ToOklch(c);
+      if (o[1] >= 0.04) hues.push([o[2], w]); // 色味の無い色(白・灰・黒・背景)は色合いを持たない
+    };
+    // STEPに入っている部品の色(頂点ごとの色。三角形ごとに1点ずつ見れば十分)を重く見る
+    if (vcolors && vcolors.length) {
+      for (let i = 0; i + 2 < vcolors.length; i += 9) addRef([vcolors[i], vcolors[i + 1], vcolors[i + 2]], 1.0);
+    } else {
+      addRef(COLOR_MODEL, 1.0);
+    }
+    // 背景色・PMIの色(注記・寸法・溶接記号)・強調や選択の色
+    let bg = '#0E1A17';
+    try { bg = getComputedStyle(document.documentElement).getPropertyValue('--viewport-bg').trim() || bg; } catch (e) { /* 既定の背景色 */ }
+    if (!bg.startsWith('#')) bg = '#0E1A17';
+    for (const hx of [bg, '#F5FAF8', '#8FA0B8', '#4F8EF7', '#E0A23B', '#4DD9E8', '#35C46A', '#FF2BC8', '#FFE81A', '#FF1F8E']) addRef(hexToRgb01(hx), 0.8);
+    let bestH = 305, bestD = -1;
+    if (hues.length) {
+      for (let H = 0; H < 360; H += 2) {
+        let d = Infinity;
+        for (const [h, w] of hues) {
+          let dh = Math.abs(H - h) % 360; if (dh > 180) dh = 360 - dh;
+          d = Math.min(d, dh / w);
+        }
+        if (d > bestD) { bestD = d; bestH = H; }
+      }
+    }
+    COLOR_OCC_GHOST = oklchToRgb01(0.68, 0.16, bestH);
+  }
   function hexToRgb01(hex) {
     const v = parseInt(hex.replace('#', ''), 16);
     return [((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255];
@@ -9113,7 +9178,13 @@
   const COLOR_MODEL = hexToRgb01('#2E6FD9');
   const COLOR_MODEL_EDGE = hexToRgb01('#12203D');
   const COLOR_OCC_SELECT = hexToRgb01('#35C46A'); // v397: 選択中のサブアセンブリ
-  const COLOR_OCC_GHOST = hexToRgb01('#9FB3D1');  // v398: 単体表示で薄く出す周りの部分
+  // v398: 単体表示で薄く出す周りの部分。
+  // v621: 以前は淡い青灰色(#9FB3D1)で、半透明にすると白っぽくなり、注記(白)と同じような色に
+  // 見えて読みにくかった。STEPに入っている部品の色・背景色・PMIの色(注記の白、寸法の青、
+  // 溶接記号の橙など)・ハイライト色のどれとも違う色を、モデルを読み込むたびに候補から選ぶ
+  // (pickOccGhostColor)。最初の値は紫(多くの配管の色・PMIの色と違う)。
+  let COLOR_OCC_GHOST = hexToRgb01('#B46BE8');
+  const OCC_GHOST_ALPHA = 0.15; // v621: 色が分かるよう、0.13からわずかに濃くした
 
   function makeLineBuffer(segPoints) {
     const arr = new Float32Array(segPoints.length * 3);
@@ -9411,6 +9482,7 @@
       }
       modelFaceData = { posBuf, normBuf, colBuf, count: positions.length / 3 };
       modelVertexColors = colors; // v596: 継ぎ目の色を決めるのに使う(画面の読み取りをやめる)
+      try { pickOccGhostColor(colors); } catch (e) { /* 選べなくても既定の色で表示する */ } // v621
 
       // エリア表示切り替え用に、三角形ごとの重心からエリアを判定し、
       // エリアごとに絞り込んだ専用のバッファも作っておく(全エリア表示
@@ -23900,6 +23972,7 @@ pmi._lineFarPoint = null;
         }
         gl.uniform1f(fuUseVColorLoc, 1.0);
         gl.uniform1f(fuAlphaLoc, 1.0);
+        if (fuGhostLoc) gl.uniform1f(fuGhostLoc, 0.0); // v621
         const occIso = occView !== 'all' && occSelected >= 0 && occNodes[occSelected] && activeFaceData === modelFaceData;
         if (!occIso) {
           gl.drawArrays(gl.TRIANGLES, 0, activeFaceData.count);
@@ -23911,12 +23984,14 @@ pmi._lineFarPoint = null;
             gl.enable(gl.BLEND);
             gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
             gl.depthMask(false);
-            gl.uniform1f(fuAlphaLoc, 0.13);
+            gl.uniform1f(fuAlphaLoc, OCC_GHOST_ALPHA);
             gl.uniform1f(fuUseVColorLoc, 0.0);
+            if (fuGhostLoc) gl.uniform1f(fuGhostLoc, 1.0); // v621
             gl.uniform3f(fuColorLoc, COLOR_OCC_GHOST[0], COLOR_OCC_GHOST[1], COLOR_OCC_GHOST[2]);
             if (o.triStart > 0) gl.drawArrays(gl.TRIANGLES, 0, o.triStart * 3);
             const totalTris = activeFaceData.count / 3;
             if (o.triEnd < totalTris) gl.drawArrays(gl.TRIANGLES, o.triEnd * 3, (totalTris - o.triEnd) * 3);
+            if (fuGhostLoc) gl.uniform1f(fuGhostLoc, 0.0); // v621
             gl.depthMask(true);
             gl.disable(gl.BLEND);
             gl.uniform1f(fuAlphaLoc, 1.0);
