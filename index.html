@@ -1171,7 +1171,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v605</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v606</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1319,6 +1319,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v606: 「PMIを一斉表示」で、指している所から遠くへ置かないようにしました(指示線を400pxまで長くする段階をやめ、置き直しの範囲も短くしました)。小さくする段階のうち、かぶりが一番少なかった段階の並べ方を、並べ直さずにそのまま使うようにしました(並べ直すと結果が変わって、かえってかぶりが増えることがあったため)。</li>
         <li>v605: 「PMIを一斉表示」で、外周の列・行に並べた番号・注記・溶接記号の間隔を、すべて同じ(等間隔)にそろえるようにしました。並び順はそのままで、かぶりが増えるときはそろえません。</li>
         <li>v604: 「PMIを一斉表示」で、指示線どうしの交差・指示線の上の記号の判定を、実際に描かれる指示線(注記は記号の中心に向かう線、溶接記号は基線の端から出る線)で行うようにしました(以前は記号の枠の一番近い所から引いた線で判定していたため、判定では交差していないのに画面では交差して見えることがありました)。指示線が部品表・リボンなどの裏を通らないようにしました。画面上部のかぶりの件数の表示はやめました。</li>
         <li>v603: 「PMIを一斉表示」の仕上げとして、かぶっている2つの番号・記号は、置き場所を入れ替える(上下逆・左右逆にする)、片方を少し上下左右にずらす、指している所のすぐ横などの空きへ動かす、を試し、かぶりが減るならそうするようにしました(指示線が交差していた「F3 B4 G5」と「B4 G5」など)。</li>
@@ -20508,7 +20509,7 @@ pmi._lineFarPoint = null;
       const t = Math.min(1, tx, ty);
       return { x: C.x + dx * t, y: C.y + dy * t };
     };
-    const MAXL = saLeaderStage ? 400 : PERIMETER_MAX_LEADER_PX;
+    const MAXL = PERIMETER_MAX_LEADER_PX; // v606: 遠くへは置かない(指示線を長くする段階はやめた)
     // v602: 拡大・縮小したら、番号・記号の大きさを元に戻してから並べ直す(拡大すれば元の大きさで入ることがある)
     { // v602: 向きを変えたら、記号の大きさ・指示線の長さの段階を最初からやり直す
       const r = sceneRotation, q0 = saRefRot;
@@ -21103,7 +21104,7 @@ pmi._lineFarPoint = null;
     if (staticCandsFn && saZoom <= SA_ZOOM_MIN + 1e-3 && !isUserViewMoving(performance.now()) && allItems.some((it) => !it.C)) {
       const tR = performance.now() + 2500;
       const cm = new Map();
-      const cOf = (it) => { let c = cm.get(it); if (!c) { c = staticCandsFn(it, PERIMETER_MAX_LEADER_PX * 3); cm.set(it, c); } return c; };
+      const cOf = (it) => { let c = cm.get(it); if (!c) { c = staticCandsFn(it, PERIMETER_MAX_LEADER_PX * 1.4); cm.set(it, c); } return c; };
       const rOv3 = (r1, r2) => r1.x0 < r2.x1 + SP && r1.x1 > r2.x0 - SP && r1.y0 < r2.y1 + SP && r1.y1 > r2.y0 - SP;
       const conf3 = (cd, o) => { const R = rectOf(o), so = segOf(o), [a, b] = cd.s; return rOv3(cd.R, R) || segTouchesRect(a, b, R, 3) || segTouchesRect(so[0], so[1], cd.R, 3) || segCrossesSeg(a, b, so[0], so[1]) || segCrossesSeg(so[0], so[1], a, b); };
       for (let pass = 0; pass < 4 && performance.now() < tR; pass++) {
@@ -21144,10 +21145,10 @@ pmi._lineFarPoint = null;
     for (const it of unplaced) {
       const L = allItems.filter((o) => o.C && o !== it);
       let best = null, bestCost = Infinity;
-      const cands = staticCandsFn ? staticCandsFn(it, PERIMETER_MAX_LEADER_PX * 3).slice(0, movingNow ? 60 : 2000) : [];
+      const cands = staticCandsFn ? staticCandsFn(it, PERIMETER_MAX_LEADER_PX * 1.4).slice(0, movingNow ? 60 : 2000) : [];
       for (const cd of cands) {
         const [a, b] = cd.s;
-        let c = cd.c * 0.01;
+        let c = cd.c * 0.05;
         for (const o of L) {
           const R = rectOf(o), so = segOf(o);
           if (cd.R.x0 < R.x1 + 2 && cd.R.x1 > R.x0 - 2 && cd.R.y0 < R.y1 + 2 && cd.R.y1 > R.y0 - 2) c += 5000;
@@ -21169,6 +21170,7 @@ pmi._lineFarPoint = null;
         for (let i = 0; i < L.length; i++) {
           const A = L[i], RA = rectOf(A), [a, b] = segOf(A);
           if (!inBounds(A)) n += 3;
+          if (Math.hypot(a.x - b.x, a.y - b.y) > PERIMETER_MAX_LEADER_PX * 1.4) n += 1; // v606: 遠すぎる
           if (hitsDimLines(RA, a, b) || dimRects.some((d) => (RA.x0 < d.x1 && RA.x1 > d.x0 && RA.y0 < d.y1 && RA.y1 > d.y0) || segTouchesRect(a, b, d, 1))) n++;
           if ((segHitsModelFn && segHitsModelFn(a, b, 22)) || (rectHitsModelFn && rectHitsModelFn(RA))) n++;
           for (let j = i + 1; j < L.length; j++) {
@@ -21206,7 +21208,7 @@ pmi._lineFarPoint = null;
         const RA = rectOf(A), [a, b] = segOf(A);
         let n = 0;
         if (!inBounds(A)) n += 3;
-        if (Math.hypot(a.x - b.x, a.y - b.y) > PERIMETER_MAX_LEADER_PX * 3) n += 1;
+        if (Math.hypot(a.x - b.x, a.y - b.y) > PERIMETER_MAX_LEADER_PX * 1.4) n += 1;
         if (hitsDimLines(RA, a, b) || dimRects.some((d) => (RA.x0 < d.x1 && RA.x1 > d.x0 && RA.y0 < d.y1 && RA.y1 > d.y0) || segTouchesRect(a, b, d, 1))) n++;
         if ((segHitsModelFn && segHitsModelFn(a, b, 22)) || (rectHitsModelFn && rectHitsModelFn(RA))) n++;
         return n;
@@ -21215,7 +21217,7 @@ pmi._lineFarPoint = null;
       const costOf = (A, excl) => { let n = selfC(A); for (const o of L) if (o !== A && o !== excl) n += pairC(A, o); return n; };
       const lenOf2 = (A) => { const [a, b] = segOf(A); return Math.hypot(a.x - b.x, a.y - b.y); };
       const cmap = new Map();
-      const candsOf = (A) => { let c = cmap.get(A); if (!c) { c = staticCandsFn ? staticCandsFn(A, PERIMETER_MAX_LEADER_PX * 1.7).slice(0, 80).map((cd) => cd.C) : []; cmap.set(A, c); } return c; };
+      const candsOf = (A) => { let c = cmap.get(A); if (!c) { c = staticCandsFn ? staticCandsFn(A, PERIMETER_MAX_LEADER_PX * 1.4).slice(0, 80).map((cd) => cd.C) : []; cmap.set(A, c); } return c; };
       const tryMove = (A) => {
         const old = A.C, base = costOf(A), baseLen = lenOf2(A);
         let best = null, bestC = base, bestLen = baseLen;
@@ -21282,10 +21284,9 @@ pmi._lineFarPoint = null;
     let stageNext = false, backTo = null;
     if (!movingNow && !saLocked) {
       const fbN = perimeterConfCount;
-      saHistory.push({ z: saZoom, st: saLeaderStage, q: fbN });
+      saHistory.push({ z: saZoom, st: saLeaderStage, q: fbN, pending: true });
       if (fbN) {
-        if (!saLeaderStage) stageNext = true;
-        else if (saZoom > SA_ZOOM_MIN + 1e-3) shrinkNext = true;
+        if (saZoom > SA_ZOOM_MIN + 1e-3) shrinkNext = true;
         else {
           // これ以上は縮めない。いちばん置けた数が多かった段階(同じなら大きい記号・短い指示線)に戻して確定する
           let best = null;
@@ -21296,7 +21297,9 @@ pmi._lineFarPoint = null;
       } else saLocked = true;
     }
     perimeterCache = { key: cacheKey, allC: new Map(allItems.filter((it) => it.C).map((it) => [it.p.id, it.C])), fb: new Set(allItems.filter((it) => it.overlapFallback).map((it) => it.p.id)) };
-    if (backTo) { saLeaderStage = backTo.st; setSaZoom(backTo.z); saZoomRefScale = sceneScale; markRenderActive(600); }
+    { const h = saHistory[saHistory.length - 1]; if (h && h.pending) { h.pending = false; h.cache = perimeterCache; } }
+    // v606: いちばん良かった段階に戻すときは、そのときの並べ方をそのまま使う(並べ直すと結果が変わるため)
+    if (backTo) { saLeaderStage = backTo.st; setSaZoom(backTo.z); if (backTo.cache) { perimeterCache = backTo.cache; perimeterConfCount = backTo.q; } saZoomRefScale = sceneScale; markRenderActive(600); }
     if (stageNext) { saLeaderStage = 1; perimeterCache = null; saZoomRefScale = sceneScale; markRenderActive(600); }
     if (shrinkNext) { setSaZoom(Math.max(SA_ZOOM_MIN, saZoom * 0.85)); saZoomRefScale = sceneScale; markRenderActive(600); }
     applyPerimeter();
