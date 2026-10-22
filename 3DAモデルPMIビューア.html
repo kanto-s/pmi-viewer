@@ -1171,7 +1171,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v603</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v604</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1319,6 +1319,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v604: 「PMIを一斉表示」で、指示線どうしの交差・指示線の上の記号の判定を、実際に描かれる指示線(注記は記号の中心に向かう線、溶接記号は基線の端から出る線)で行うようにしました(以前は記号の枠の一番近い所から引いた線で判定していたため、判定では交差していないのに画面では交差して見えることがありました)。指示線が部品表・リボンなどの裏を通らないようにしました。画面上部のかぶりの件数の表示はやめました。</li>
         <li>v603: 「PMIを一斉表示」の仕上げとして、かぶっている2つの番号・記号は、置き場所を入れ替える(上下逆・左右逆にする)、片方を少し上下左右にずらす、指している所のすぐ横などの空きへ動かす、を試し、かぶりが減るならそうするようにしました(指示線が交差していた「F3 B4 G5」と「B4 G5」など)。</li>
         <li>v602: 「PMIを一斉表示」で、必ずすべてのPMIを出すようにしました。寸法線・寸法補助線も、番号・記号を重ねない・指示線を交差させない対象に加えました。重ならずに置けないものがあるときは、まず指示線を少し長く(400pxまで)許し、それでも足りなければ番号・記号を少しずつ小さく(最小0.7倍)して並べ直し、かぶりが一番少なかった段階を使います。外周に順番どおり並べた並べ方とも比べ、かぶりの少ない方を使います。避けられないかぶりが残るときは、その数を画面上部に表示します。</li>
         <li>v601: 「PMIを一斉表示」で、かぶりを一切出さないようにしました。記号どうしの重なり、指示線どうしの交差、指示線が他の記号・寸法値・モデルの上を通ること、記号が寸法値・モデル・リボン・部品表・画面の外にかかることを、どの向きでも最後に必ず確かめ、かぶるものは画面全体からかぶらない所を探して移します。指示線の長さは240pxまでにし、指している所から遠くへは置きません。どうしても置けないものはその見え方では出さず、件数を画面上部に表示します(拡大すると出ます)。部品表やリボンの大きさが変わったときも並べ直します。</li>
@@ -20497,6 +20498,15 @@ pmi._lineFarPoint = null;
   const PERIMETER_MAX_LEADER_PX = 240; // v601: 一斉表示で、指示線(記号から指している所まで)の長さの上限
   function perimeterLayoutAll(allScreenPmis, mvp) {
     if (!showAllAtOnce) return;
+    // v604: 実際に描かれる指示線の出だし(注記は、記号の中心と指している点を結ぶ線が枠と交わる所。
+    // 溶接記号は、指している点の側の基線の端)。重なり・交差の判定はこの線で行う
+    const leaderStart = (C, g, O, it) => {
+      if (it && it.knee) return { x: C.x + (O.x >= C.x ? 1 : -1) * it.knee.ax, y: C.y + it.knee.ky };
+      const dx = O.x - C.x, dy = O.y - C.y;
+      const tx = Math.abs(dx) > 1e-6 ? (g.w / 2) / Math.abs(dx) : Infinity, ty = Math.abs(dy) > 1e-6 ? (g.h / 2) / Math.abs(dy) : Infinity;
+      const t = Math.min(1, tx, ty);
+      return { x: C.x + dx * t, y: C.y + dy * t };
+    };
     const MAXL = saLeaderStage ? 400 : PERIMETER_MAX_LEADER_PX;
     // v602: 拡大・縮小したら、番号・記号の大きさを元に戻してから並べ直す(拡大すれば元の大きさで入ることがある)
     { // v602: 向きを変えたら、記号の大きさ・指示線の長さの段階を最初からやり直す
@@ -20533,7 +20543,20 @@ pmi._lineFarPoint = null;
       const O = oL ? project(mvp, oL) : null;
       const g = measureTagCenterOffset(p);
       if (!O || !g || !(g.w > 0)) continue;
-      items.push({ p, O, g });
+      // v604: 溶接記号の指示線は、基線の端(折れ点)から出る。折れ点の、記号の中心からの位置を覚えておく
+      let knee = null;
+      if (p.category === 'weld') {
+        try {
+          const tag = el.querySelector('.pmi-tag'), ic = el.querySelector('.pmi-weld-icon');
+          if (tag && ic && ic.dataset.kneeFx) {
+            const tr = tag.getBoundingClientRect(), ir = ic.getBoundingClientRect();
+            const kx = ir.left + ir.width * parseFloat(ic.dataset.kneeFx) - (tr.left + tr.right) / 2;
+            const ky = ir.top + ir.height * parseFloat(ic.dataset.kneeFy) - (tr.top + tr.bottom) / 2;
+            if (isFinite(kx) && isFinite(ky)) knee = { ax: Math.min(Math.abs(kx), g.w / 2), ky: Math.max(-g.h / 2, Math.min(g.h / 2, ky)) };
+          }
+        } catch (e) { knee = null; }
+      }
+      items.push({ p, O, g, knee });
     }
     if (!items.length) return;
     if (!(mx1 > mx0)) { mx0 = Math.min(...items.map((i) => i.O.x)); mx1 = Math.max(...items.map((i) => i.O.x)); my0 = Math.min(...items.map((i) => i.O.y)); my1 = Math.max(...items.map((i) => i.O.y)); }
@@ -20566,10 +20589,12 @@ pmi._lineFarPoint = null;
         const r = q._dimFinalRect;
         if (r) dimRects.push({ x0: r.left - cr1.left - 2, x1: r.right - cr1.left + 2, y0: r.top - cr1.top - 2, y1: r.bottom - cr1.top + 2 });
       } }
+    banned.push({ x0: -10000, y0: -10000, x1: 10000, y1: top0 - 8, isRibbon: true }); // v604: リボン(上の帯)の裏にも指示線を通さない
     // v602: 寸法線・寸法補助線(番号・記号を重ねない、指示線と交差させない)
     let dimSegs = [];
     try { dimSegs = collectDimScreenSegs(allScreenPmis, mvp).filter((sg) => sg && sg[0] && sg[1]); } catch (e) { dimSegs = []; }
     const hitsDimLines = (R, a, b) => {
+      if (a) for (const bb of banned) if (segTouchesRect(a, b, bb, 2)) return true; // v604: 指示線を部品表・リボンなどの裏に通さない
       for (const [p1, p2] of dimSegs) {
         if (R && segTouchesRect(p1, p2, R, 1)) return true;
         if (a && (segCrossesSeg(a, b, p1, p2) || segCrossesSeg(p1, p2, a, b))) return true;
@@ -20584,7 +20609,7 @@ pmi._lineFarPoint = null;
       let note = document.getElementById('perimeterHiddenNote');
       if (!note) { note = document.createElement('div'); note.id = 'perimeterHiddenNote'; note.style.cssText = 'position:fixed; left:50%; transform:translateX(-50%); z-index:60; font-size:12px; padding:4px 8px; border-radius:6px; background:rgba(0,0,0,0.6); color:#ffd479; pointer-events:none;'; document.body.appendChild(note); }
       note.textContent = nHid ? ('この見え方では、どうしても避けられないかぶりが' + nHid + 'か所あります(拡大するか向きを変えると減ります)') : '';
-      note.style.display = nHid ? '' : 'none';
+      note.style.display = 'none'; void nHid; // v604: 件数の表示は出さない(不要とのこと)
       note.style.top = (getRibbonHeightPx() + 6) + 'px';
     }
     for (const it of allItems) {
@@ -20622,7 +20647,7 @@ pmi._lineFarPoint = null;
         return false;
       };
       const nearRect = (C, g) => ({ x0: C.x - g.w / 2, x1: C.x + g.w / 2, y0: C.y - g.h / 2, y1: C.y + g.h / 2 });
-      const nearSeg = (C, g, O) => { const r = nearRect(C, g); return [{ x: Math.min(r.x1, Math.max(r.x0, O.x)), y: Math.min(r.y1, Math.max(r.y0, O.y)) }, O]; };
+      const nearSeg = (C, g, O, it) => [leaderStart(C, g, O, it), O];
       const okBox = (r) => r.x0 >= left0 && r.x1 <= right0 && r.y0 >= top0 && r.y1 <= bottom0 && !banned.some((b) => r.x0 < b.x1 && r.x1 > b.x0 && r.y0 < b.y1 && r.y1 > b.y0);
       const allO = allItems.map((it) => it.O);
       const ANG = 36, RAD = [14, 28, 46, 68, 95, 125, 160, 200];
@@ -20641,7 +20666,7 @@ pmi._lineFarPoint = null;
             if (dimRects.some((d) => Rm.x0 < d.x1 && Rm.x1 > d.x0 && Rm.y0 < d.y1 && Rm.y1 > d.y0)) continue; // v601: 寸法値に重ねない
             // ほかの記号が指している点を隠さない
             if (allO.some((o) => o !== it.O && o.x > Rm.x0 && o.x < Rm.x1 && o.y > Rm.y0 && o.y < Rm.y1)) continue;
-            const [a, b] = nearSeg(C, it.g, it.O);
+            const [a, b] = nearSeg(C, it.g, it.O, it);
             if (done.some((d) => segTouchesRect(a, b, d.r, 3) || (d.s && (segCrossesSeg(a, b, d.s[0], d.s[1]) || segCrossesSeg(d.s[0], d.s[1], a, b) || segTouchesRect(d.s[0], d.s[1], R, 3))))) continue;
             if (dimRects.some((d) => segTouchesRect(a, b, d, 1))) continue; // v601: 指示線を寸法値の上に通さない
             if (rectHitsModel(Rm)) continue;
@@ -20667,7 +20692,7 @@ pmi._lineFarPoint = null;
           const Rm = { x0: R.x0 - 3, x1: R.x1 + 3, y0: R.y0 - 3, y1: R.y1 + 3 };
           if (dimRects.some((d) => Rm.x0 < d.x1 && Rm.x1 > d.x0 && Rm.y0 < d.y1 && Rm.y1 > d.y0)) continue;
           if (allO.some((o) => o !== it.O && o.x > Rm.x0 && o.x < Rm.x1 && o.y > Rm.y0 && o.y < Rm.y1)) continue;
-          const [a, b] = nearSeg(C, it.g, it.O);
+          const [a, b] = nearSeg(C, it.g, it.O, it);
           if (dimRects.some((d) => segTouchesRect(a, b, d, 1))) continue;
           if (rectHitsModel(Rm) || segHitsModel(a, b, keepEnd)) continue;
           if (hitsDimLines(Rm, a, b)) continue; // v602
@@ -20807,7 +20832,7 @@ pmi._lineFarPoint = null;
     }
     // 指示線: 記号の枠のうち、指している点に一番近い所から点まで
     const rectOf = (it) => ({ x0: it.C.x - it.g.w / 2, x1: it.C.x + it.g.w / 2, y0: it.C.y - it.g.h / 2, y1: it.C.y + it.g.h / 2 });
-    const segOf = (it) => { const r = rectOf(it); return [{ x: Math.min(r.x1, Math.max(r.x0, it.O.x)), y: Math.min(r.y1, Math.max(r.y0, it.O.y)) }, it.O]; };
+    const segOf = (it) => [leaderStart(it.C, it.g, it.O, it), it.O];
     const placed = allItems.filter((it) => it.C);
     // 1件ぶんの悪さ: 指示線どうしの交差、指示線が他の記号に重なる、記号どうしの重なり、指示線の長さ
     const itemCost = (it) => {
