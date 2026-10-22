@@ -1171,7 +1171,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v616</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v617</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1319,6 +1319,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v617: 「PMIを一斉表示」の仕上げを追加しました。並べたあと、実際に描かれる指示線で、記号がモデル・寸法値の上にないか、指示線がモデル・寸法値・寸法線の上を通らないか、指示線どうしが交差しないか、指示線がほかの記号に触れないかを調べ、かぶっているものや指示線が長いものは、指している所の近くの空いている所(ほかのどれともかぶらない所)へ移します。交差は特に重く数え、たすき掛けの2つは置き場所を入れ替えます。指している点がモデルの絵の内側にあるときは、外へ出るまでの最短の長さだけはモデルの上を通ってもよいことにしました。</li>
         <li>v616: 「PMIを一斉表示」で、PMIを四角の枠の4辺のうち、指示線が辺に直角(列なら水平、行なら垂直)に近く、かつ短くなる辺に置くようにしました。枠を大きくする前に番号・記号を少し小さくし、間隔を詰めて、枠とモデルのあいだが空きすぎないようにしました。外側に2重目の列は作らず、置けなかったものも必ず空いている所へ置きます。モデルの内側の空き(L字の所など)は5か所まで使います。</li>
         <li>v615: 「PMIを一斉表示」の並べ方を整理しました。外側の並びは、モデルを囲む1つの四角(枠)の4辺(左右の列・上下の行)に沿わせ、四隅は空けて重ならないようにしました。足りないときは枠を少しずつ大きくします。置き場所は記号の平均の大きさで入る数だけ等間隔に用意し、1つの置き場所に1つのPMIを置きます。内側の空きに置いたもののうち、ほかの指示線がすぐ近くを通る(指示線のあいだに挟まる)ものは内側に置かず、外側の枠へ回します。</li>
         <li>v614: 「PMIを一斉表示」で、モデルの内側の狭い空き(周りの薄い部品の所など)も、小さな番号なら入る大きさがあれば使うようにしました(入る大きさのものだけを置きます)。使う空きは3か所までです。</li>
@@ -21939,6 +21940,105 @@ pmi._lineFarPoint = null;
           for (const [it, v] of save) { it.C = v.C; it.S = v.S; it.kind = v.kind; }
         }
         if (!improved) break;
+      }
+    }
+    // v617: 仕上げ(かぶり0を目指す): 実際に描かれる指示線で、モデル・寸法値・寸法線・ほかのPMIの指示線や記号との
+    // かぶりを調べ、かぶっているものと、指示線が長いものは、指している所の近くの空いている所(モデルも寸法も無い所)へ移す。
+    // 移す先は、ほかのどれともかぶらない所だけ。
+    if (!moving) {
+      const tFix = performance.now() + 900;
+      const startOf = (it, C) => {
+        if (it.knee) { const sg = it.O.x >= C.x ? 1 : -1; return { x: C.x + sg * it.knee.ax, y: C.y + it.knee.ky }; }
+        const dx = it.O.x - C.x, dy = it.O.y - C.y;
+        const tx = Math.abs(dx) > 1e-6 ? (it.g.w / 2) / Math.abs(dx) : Infinity, ty = Math.abs(dy) > 1e-6 ? (it.g.h / 2) / Math.abs(dy) : Infinity;
+        const t = Math.min(1, tx, ty);
+        return { x: C.x + dx * t, y: C.y + dy * t };
+      };
+      for (const it of items) if (it.C) it.S = startOf(it, it.C);
+      // 指している点がモデルの絵の内側にあるときは、どの向きに引いても少しはモデルの上を通る。
+      // 一番早くモデルの外へ出られる向きでの長さ(+少し)までは、通ってもよいことにする
+      const cellOn = (x, y) => { const gx = Math.floor(x / CS), gy = Math.floor(y / CS); return gx >= 0 && gy >= 0 && gx < GW && gy < GH && mGrid[gy * GW + gx] === 1; };
+      for (const it of items) {
+        let best = 400;
+        for (let k = 0; k < 24; k++) {
+          const an = (k / 24) * Math.PI * 2, ux = Math.cos(an), uy = Math.sin(an);
+          let free = 0;
+          for (let d = 2; d < best; d += 2) { if (cellOn(it.O.x + ux * d, it.O.y + uy * d)) free = 0; else { free += 2; if (free >= 8) { best = Math.min(best, d - 8); break; } } }
+        }
+        it.keepEnd = Math.max(22, best + 8);
+      }
+      const live = () => items.filter((it) => it.C);
+      const selfBad = (it, C, S) => {
+        const R = rectAt(it, C);
+        let n2 = 0;
+        if (!inScreen(R) || banned.some((b) => ov(R, b, 0))) n2 += 50;
+        if (rectOnModel({ x0: R.x0 - 2, x1: R.x1 + 2, y0: R.y0 - 2, y1: R.y1 + 2 })) n2 += 20; // 記号がモデルの上
+        if (dimRects.some((d) => ov(R, d, 2))) n2 += 20; // 記号が寸法値の上
+        for (const [a, b] of dimSegs) if (segTouchesRect(a, b, R, 1)) { n2 += 10; break; }
+        if (segOnModel(S, it.O, it.keepEnd) > 0) n2 += 6; // 指示線がモデルを貫通
+        if (dimRects.some((d) => segTouchesRect(S, it.O, d, 1))) n2 += 10; // 指示線が寸法値の上
+        for (const [a, b] of dimSegs) if (segCrossesSeg(S, it.O, a, b) || segCrossesSeg(a, b, S, it.O)) { n2 += 3; break; }
+        if (banned.some((b) => segTouchesRect(S, it.O, b, 1))) n2 += 30;
+        return n2;
+      };
+      const pairBad = (it, C, S, o) => {
+        const R = rectAt(it, C), Ro = rectAt(o, o.C);
+        let n2 = 0;
+        if (ov(R, Ro, 4)) n2 += 20;
+        if (segTouchesRect(S, it.O, Ro, 3) || segTouchesRect(o.S, o.O, R, 3)) n2 += 12;
+        if (segCrossesSeg(S, it.O, o.S, o.O) || segCrossesSeg(o.S, o.O, S, it.O)) n2 += 15; // 指示線どうしの交差は絶対に避ける
+        return n2;
+      };
+      const badAt = (it, C, L) => { const S = startOf(it, C); let n2 = selfBad(it, C, S); for (const o of L) if (o !== it) n2 += pairBad(it, C, S, o); return n2; };
+      const lenAt = (it, C) => { const S = startOf(it, C); return Math.hypot(S.x - it.O.x, S.y - it.O.y); };
+      const nearCands = (it, maxR) => {
+        const out = [];
+        for (let r = 16; r <= maxR; r += 12) for (let k = 0; k < 32; k++) {
+          const an = (k / 32) * Math.PI * 2, ux = Math.cos(an), uy = Math.sin(an);
+          const ext = Math.min(Math.abs(ux) > 1e-6 ? it.g.w / 2 / Math.abs(ux) : Infinity, Math.abs(uy) > 1e-6 ? it.g.h / 2 / Math.abs(uy) : Infinity);
+          out.push({ x: it.O.x + ux * (r + ext), y: it.O.y + uy * (r + ext) });
+        }
+        return out;
+      };
+      for (let round = 0; round < 6 && performance.now() < tFix; round++) {
+        let changed = round < 3;
+        const L = live();
+        // かぶりの多い順、同じなら指示線の長い順
+        const order = L.map((it) => ({ it, b: badAt(it, it.C, L), l: lenAt(it, it.C) })).sort((p1, p2) => p2.b - p1.b || p2.l - p1.l);
+        for (const { it } of order) {
+          if (performance.now() > tFix) break;
+          const curB = badAt(it, it.C, L), curL = lenAt(it, it.C);
+          if (curB === 0 && curL < 110) continue;
+          // かぶりが無いものは、今より十分短くなる所だけを探す
+          const maxR = curB ? (round >= 2 ? 560 : 320) : Math.min(320, curL * 0.65);
+          let best = null, bestB = curB, bestL = curL;
+          for (const C of nearCands(it, maxR)) {
+            const l = lenAt(it, C);
+            if (curB === 0 && l > curL * 0.65) continue;
+            const b = badAt(it, C, L);
+            if (b < bestB || (b === bestB && l < bestL - 1 && (b === 0 || curB > 0))) { best = C; bestB = b; bestL = l; if (b === 0 && l < 60) break; }
+          }
+          if (best && (bestB < curB || (bestB === 0 && bestL < curL * 0.65))) { it.C = best; it.S = startOf(it, best); it.kind = 'N'; changed = true; }
+        }
+        if (!changed) break;
+      }
+      // 交差・かぶりが残る2つは、置き場所を入れ替えてみる(たすき掛けは入れ替えると解ける)
+      const tSw = performance.now() + 300;
+      for (let round = 0; round < 4 && performance.now() < tSw; round++) {
+        let sw = false;
+        const L = live();
+        for (let a = 0; a < L.length && performance.now() < tSw; a++) for (let b = a + 1; b < L.length; b++) {
+          const A = L[a], B = L[b];
+          if (!pairBad(A, A.C, A.S, B)) continue;
+          const before = badAt(A, A.C, L) + badAt(B, B.C, L);
+          const ca = A.C, cb = B.C;
+          // 大きさが違うので、記号の端(指示線側)をそろえるのではなく中心を入れ替える
+          A.C = cb; B.C = ca; A.S = startOf(A, A.C); B.S = startOf(B, B.C);
+          const after = badAt(A, A.C, L) + badAt(B, B.C, L);
+          if (after < before) { sw = true; continue; }
+          A.C = ca; B.C = cb; A.S = startOf(A, A.C); B.S = startOf(B, B.C);
+        }
+        if (!sw) break;
       }
     }
     perimMatchCache = { key, C: new Map(items.filter((it) => it.C).map((it) => [it.p.id, it.C])) };
