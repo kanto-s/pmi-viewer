@@ -1171,7 +1171,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v606</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v607</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1319,6 +1319,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v607: 「PMIを一斉表示」の処理を速くしました(1回の並べ直しにかける時間に上限を設け、置き場所の候補の計算を使い回し、記号を小さくする段階を3つまでにしました)。また、JIS Z 8322 4.(引出線は折り曲げてもよい・他の引出線などと交差させてはならない)に従い、まっすぐではどうしてもかぶる指示線は、1回折り曲げてかぶらない道筋で結ぶようにしました。</li>
         <li>v606: 「PMIを一斉表示」で、指している所から遠くへ置かないようにしました(指示線を400pxまで長くする段階をやめ、置き直しの範囲も短くしました)。小さくする段階のうち、かぶりが一番少なかった段階の並べ方を、並べ直さずにそのまま使うようにしました(並べ直すと結果が変わって、かえってかぶりが増えることがあったため)。</li>
         <li>v605: 「PMIを一斉表示」で、外周の列・行に並べた番号・注記・溶接記号の間隔を、すべて同じ(等間隔)にそろえるようにしました。並び順はそのままで、かぶりが増えるときはそろえません。</li>
         <li>v604: 「PMIを一斉表示」で、指示線どうしの交差・指示線の上の記号の判定を、実際に描かれる指示線(注記は記号の中心に向かう線、溶接記号は基線の端から出る線)で行うようにしました(以前は記号の枠の一番近い所から引いた線で判定していたため、判定では交差していないのに画面では交差して見えることがありました)。指示線が部品表・リボンなどの裏を通らないようにしました。画面上部のかぶりの件数の表示はやめました。</li>
@@ -20492,7 +20493,7 @@ pmi._lineFarPoint = null;
   // 辺ごとに指している点の順に並べるので、同じ辺の指示線どうしは交差しない。番号・記号どうしは重ならない。
   let perimeterCache = null;
   let saZoom = 1, saZoomRefScale = 0; // v602: 一斉表示で全部を重ならずに置くための、番号・記号の縮小率
-  const SA_ZOOM_MIN = 0.7;
+  const SA_ZOOM_MIN = 0.72; // v608: 段階は 1 → 0.85 → 0.72 の3つまで
   function setSaZoom(z) { saZoom = z; document.body.style.setProperty('--sa-zoom', String(z)); perimeterCache = null; }
   let saHistory = [], saLocked = false, saRefRot = null; // v602: 段階ごとの結果(置けなかった数)。いちばん良かった段階に戻すため
   let perimeterRingWon = 0, perimeterConfCount = 0;
@@ -20500,6 +20501,9 @@ pmi._lineFarPoint = null;
   const PERIMETER_MAX_LEADER_PX = 240; // v601: 一斉表示で、指示線(記号から指している所まで)の長さの上限
   function perimeterLayoutAll(allScreenPmis, mvp) {
     if (!showAllAtOnce) return;
+    // v608: 1回の並べ直しにかける時間の上限(重くならないように)。最後の折り曲げの分は別に取っておく
+    const P_T0 = performance.now(), P_MOV = isUserViewMoving(P_T0);
+    const PDL = P_T0 + (P_MOV ? 25 : 450), PDL2 = P_T0 + (P_MOV ? 35 : 650);
     // v604: 実際に描かれる指示線の出だし(注記は、記号の中心と指している点を結ぶ線が枠と交わる所。
     // 溶接記号は、指している点の側の基線の端)。重なり・交差の判定はこの線で行う
     const leaderStart = (C, g, O, it) => {
@@ -20625,17 +20629,18 @@ pmi._lineFarPoint = null;
       if (p._naturalScreenX != null) { p._declutterDX = nx - p._naturalScreenX; p._declutterDY = ny - p._naturalScreenY; }
       if (p._anchorScreen) { p._noteRelDX = nx - p._anchorScreen.x; p._noteRelDY = ny - p._anchorScreen.y; p._notePend = null; }
       p._perimeterPlaced = true;
+      p._perimBend = it.bend || null; p._perimO = it.O; // v607: 折り曲げた指示線の折れ点・指す点
       const el = markerEls.get(p.id);
       if (el) { el.style.left = nx + 'px'; el.style.top = ny + 'px'; }
     }
     };
     if (cacheOk && perimeterCache.allC) {
-      for (const it of allItems) { const C = perimeterCache.allC.get(it.p.id); if (C) it.C = C; if (perimeterCache.fb && perimeterCache.fb.has(it.p.id)) it.overlapFallback = true; }
+      for (const it of allItems) { const C = perimeterCache.allC.get(it.p.id); if (C) it.C = C; if (perimeterCache.fb && perimeterCache.fb.has(it.p.id)) it.overlapFallback = true; if (perimeterCache.bends && perimeterCache.bends.has(it.p.id)) it.bend = perimeterCache.bends.get(it.p.id); }
       applyPerimeter();
       return;
     }
     const nearItems = [];
-    let searchNearFn = null, nearRectFn = null, segHitsModelFn = null, rectHitsModelFn = null, staticCandsFn = null;
+    let searchNearFn = null, nearRectFn = null, segHitsModelFn = null, rectHitsModelFn = null, staticCandsFn = null, rectOkFn = null, modelAtFn = null;
     {
       const cov = getScreenCover(mvp);
       const modelAt = (x, y) => !!(cov && x >= 0 && y >= 0 && x < cw && y < ch && cov.at(x, y));
@@ -20705,7 +20710,10 @@ pmi._lineFarPoint = null;
         if (!out.length && keepEnd < 120) return staticCands(it, maxR, keepEnd < 60 ? 60 : 120);
         return out;
       };
-      if (cov) { searchNearFn = searchNear; nearRectFn = nearRect; segHitsModelFn = segHitsModel; rectHitsModelFn = rectHitsModel; staticCandsFn = staticCands; }
+      const scMemo = new Map();
+      const staticCandsMemo = (it, maxR) => { const k = it.p.id + '|' + Math.round(maxR); let v = scMemo.get(k); if (!v) { v = staticCands(it, maxR); scMemo.set(k, v); } return v; };
+      if (cov) { searchNearFn = searchNear; nearRectFn = nearRect; segHitsModelFn = segHitsModel; rectHitsModelFn = rectHitsModel; staticCandsFn = staticCandsMemo; }
+      if (cov) { rectOkFn = (R, it) => { const Rm = { x0: R.x0 - 3, x1: R.x1 + 3, y0: R.y0 - 3, y1: R.y1 + 3 }; return okBox(R) && !dimRects.some((d) => Rm.x0 < d.x1 && Rm.x1 > d.x0 && Rm.y0 < d.y1 && Rm.y1 > d.y0) && !allO.some((o) => o !== it.O && o.x > Rm.x0 && o.x < Rm.x1 && o.y > Rm.y0 && o.y < Rm.y1) && !rectHitsModel(Rm) && !hitsDimLines(Rm, null, null); }; modelAtFn = modelAt; }
       if (cacheOk && perimeterCache.near) {
         const byId = new Map(allItems.map((it) => [it.p.id, it]));
         for (const [id, C] of perimeterCache.near) { const it = byId.get(id); if (it) { it.C = C; it.near = true; nearItems.push(it); } }
@@ -20861,7 +20869,7 @@ pmi._lineFarPoint = null;
     };
     const lineCost = (ln) => ln.list.reduce((a, it) => a + itemCost(it), 0);
     // 並び順の入れ替えで、交差・重なりが減るなら入れ替える(時間を区切って行う)
-    const tEnd = cacheHit ? 0 : performance.now() + (isUserViewMoving(performance.now()) ? 15 : 150);
+    const tEnd = cacheHit ? 0 : Math.min(PDL, performance.now() + (isUserViewMoving(performance.now()) ? 15 : 150));
     for (let round = 0; round < 10 && performance.now() < tEnd; round++) {
       let improved = false;
       for (const ln of lines) {
@@ -20910,7 +20918,7 @@ pmi._lineFarPoint = null;
     // 指示線がモデルやほかの記号の上を通らず、ほかの指示線とも交差しない所)があれば、そこへ移す。
     // 移した分だけ輪を詰め直すと、輪から延びる指示線が減って近くの空きが増えるので、これを何回か繰り返す。
     if (!cacheHit && searchNearFn) {
-      const tEndF = performance.now() + (isUserViewMoving(performance.now()) ? 60 : 450);
+      const tEndF = Math.min(PDL, performance.now() + (isUserViewMoving(performance.now()) ? 60 : 450));
       const segLen = (it) => { const [a, b] = segOf(it); return Math.hypot(a.x - b.x, a.y - b.y); };
       const badness = () => {
         let c = 0;
@@ -20961,7 +20969,7 @@ pmi._lineFarPoint = null;
     // 指示線がほかの記号・寸法値・モデルの上を通る、記号が寸法値・モデル・リボン・部品表・画面の外にかかる)は、
     // かぶらない所を画面全体から探して移す。どこにも無ければ、その視点では出さない(かぶったままは出さない)。
     {
-      const strictBudget = performance.now() + (isUserViewMoving(performance.now()) ? 40 : 2500);
+      const strictBudget = Math.min(PDL, performance.now() + (isUserViewMoving(performance.now()) ? 40 : 2500));
       const MAX_LEADER = MAXL;
       const FULL_RAD = []; for (let r = 10; r <= MAX_LEADER; r += 12) FULL_RAD.push(r);
       const live = () => allItems.filter((it) => it.C);
@@ -21026,7 +21034,7 @@ pmi._lineFarPoint = null;
     // v601: もう一つの並べ方(B): 置き場所の候補が少ないもの(置きにくいもの)から順に、指している所に一番近い、
     // かぶらない候補へ置く。今の並べ方(A)より多くのPMIを出せるなら、こちらを使う。
     if (staticCandsFn && !isUserViewMoving(performance.now())) {
-      const tB = performance.now() + 2500;
+      const tB = Math.min(PDL, performance.now() + 2500);
       const hidA = allItems.filter((it) => !it.C).length;
       if (hidA > 0) {
         const snapA = new Map(allItems.map((it) => [it, it.C]));
@@ -21102,7 +21110,7 @@ pmi._lineFarPoint = null;
     // v602: いちばん小さくしても置けないものは、指示線を長めに許して、じゃまをしている1つを別の所へ動かせば
     // かぶらずに置けるなら、そうする
     if (staticCandsFn && saZoom <= SA_ZOOM_MIN + 1e-3 && !isUserViewMoving(performance.now()) && allItems.some((it) => !it.C)) {
-      const tR = performance.now() + 2500;
+      const tR = Math.min(PDL, performance.now() + 2500);
       const cm = new Map();
       const cOf = (it) => { let c = cm.get(it); if (!c) { c = staticCandsFn(it, PERIMETER_MAX_LEADER_PX * 1.4); cm.set(it, c); } return c; };
       const rOv3 = (r1, r2) => r1.x0 < r2.x1 + SP && r1.x1 > r2.x0 - SP && r1.y0 < r2.y1 + SP && r1.y1 > r2.y0 - SP;
@@ -21145,7 +21153,7 @@ pmi._lineFarPoint = null;
     for (const it of unplaced) {
       const L = allItems.filter((o) => o.C && o !== it);
       let best = null, bestCost = Infinity;
-      const cands = staticCandsFn ? staticCandsFn(it, PERIMETER_MAX_LEADER_PX * 1.4).slice(0, movingNow ? 60 : 2000) : [];
+      const cands = (staticCandsFn && performance.now() < PDL) ? staticCandsFn(it, PERIMETER_MAX_LEADER_PX * 1.4).slice(0, movingNow ? 60 : 2000) : [];
       for (const cd of cands) {
         const [a, b] = cd.s;
         let c = cd.c * 0.05;
@@ -21195,7 +21203,7 @@ pmi._lineFarPoint = null;
     // v603: 仕上げ: かぶっている2つは、置き場所を入れ替えたり(上下逆にする)、片方を少しずらしたり、
     // 指している所のすぐ横などの空きへ動かしたりして、かぶりが減るならそうする
     if (!isUserViewMoving(performance.now())) {
-      const tP = performance.now() + 1500;
+      const tP = Math.min(PDL, performance.now() + 1500);
       const pairC = (A, B) => {
         const RA = rectOf(A), RB = rectOf(B), [a, b] = segOf(A), [c, d] = segOf(B);
         let n = 0;
@@ -21276,9 +21284,79 @@ pmi._lineFarPoint = null;
           if (totAll() > before) members.forEach((it, k) => { it.C = save[k]; });
         }
       }
+      // v607: JIS Z 8322 4.「引出線は折り曲げてもよい」「他の引出線…と交差させてはならない」。
+      // まっすぐではどうしてもかぶるものは、指示線を1回折り曲げて、かぶらない道筋で結ぶ。
+      const segsOf = (A) => {
+        if (A.bend) { const S = leaderStart(A.C, A.g, A.bend, A); return [[S, A.bend, 0], [A.bend, A.O, 22]]; }
+        const [a, b] = segOf(A); return [[a, b, 22]];
+      };
+      const pairP = (A, B) => {
+        const RA = rectOf(A), RB = rectOf(B), sa = segsOf(A), sb = segsOf(B);
+        let n = 0;
+        if (RA.x0 < RB.x1 + 2 && RA.x1 > RB.x0 - 2 && RA.y0 < RB.y1 + 2 && RA.y1 > RB.y0 - 2) n += 2;
+        if (sa.some(([a, b]) => segTouchesRect(a, b, RB, 2)) || sb.some(([a, b]) => segTouchesRect(a, b, RA, 2))) n++;
+        let cx = false;
+        for (const [a, b] of sa) { for (const [c, d] of sb) if (segCrossesSeg(a, b, c, d) || segCrossesSeg(c, d, a, b)) { cx = true; break; } if (cx) break; }
+        if (cx) n++;
+        return n;
+      };
+      const selfP = (A) => {
+        const RA = rectOf(A), sa = segsOf(A);
+        let n = 0;
+        if (!inBounds(A)) n += 3;
+        let len = 0; for (const [a, b] of sa) len += Math.hypot(a.x - b.x, a.y - b.y);
+        if (len > PERIMETER_MAX_LEADER_PX * 1.4) n += 1;
+        if (dimRects.some((d) => RA.x0 < d.x1 && RA.x1 > d.x0 && RA.y0 < d.y1 && RA.y1 > d.y0) || hitsDimLines(RA, null, null) || sa.some(([a, b]) => hitsDimLines(null, a, b) || dimRects.some((d) => segTouchesRect(a, b, d, 1)))) n++;
+        if ((rectHitsModelFn && rectHitsModelFn(RA)) || (segHitsModelFn && sa.some(([a, b, k]) => segHitsModelFn(a, b, k)))) n++;
+        return n;
+      };
+      const costP = (A) => { let n = selfP(A); for (const o of L) if (o !== A) n += pairP(A, o); return n; };
+      if (rectOkFn && modelAtFn && performance.now() < PDL2) {
+        const tB2 = PDL2;
+        const bad = L.filter((A) => costP(A) > 0).sort((p1, p2) => costP(p2) - costP(p1));
+        for (const A of bad) {
+          if (performance.now() > tB2) break;
+          if (costP(A) === 0) continue;
+          const oldC = A.C, oldB = A.bend || null;
+          const labels = [];
+          for (let r = 30; r <= PERIMETER_MAX_LEADER_PX; r += 18) for (let k = 0; k < 24; k++) {
+            const an = (k / 24) * Math.PI * 2, ux = Math.cos(an), uy = Math.sin(an);
+            const ext = Math.min(Math.abs(ux) > 1e-6 ? A.g.w / 2 / Math.abs(ux) : Infinity, Math.abs(uy) > 1e-6 ? A.g.h / 2 / Math.abs(uy) : Infinity);
+            const C = { x: A.O.x + ux * (r + ext), y: A.O.y + uy * (r + ext) };
+            const R = { x0: C.x - A.g.w / 2, x1: C.x + A.g.w / 2, y0: C.y - A.g.h / 2, y1: C.y + A.g.h / 2 };
+            if (!rectOkFn(R, A)) continue;
+            if (L.some((o) => o !== A && (() => { const Ro = rectOf(o); return R.x0 < Ro.x1 + SP && R.x1 > Ro.x0 - SP && R.y0 < Ro.y1 + SP && R.y1 > Ro.y0 - SP; })())) continue;
+            labels.push({ C, r, an });
+          }
+          labels.sort((p1, p2) => p1.r - p2.r);
+          let found = null;
+          for (const lb of labels) {
+            if (performance.now() > tB2) break;
+            // 折れ点: 指している点の周り(記号のある向き±70°の範囲)
+            const ks = [];
+            for (let kr = 18; kr <= Math.min(140, lb.r + 40); kr += 16) for (let da = -70; da <= 70; da += 20) {
+              const an = lb.an + da * Math.PI / 180;
+              const K = { x: A.O.x + Math.cos(an) * kr, y: A.O.y + Math.sin(an) * kr };
+              if (modelAtFn(K.x, K.y)) continue;
+              ks.push({ K, d: Math.hypot(K.x - lb.C.x, K.y - lb.C.y) + kr });
+            }
+            ks.sort((p1, p2) => p1.d - p2.d);
+            for (const { K } of ks) {
+              A.C = lb.C; A.bend = K;
+              // 折れ角が小さすぎる(ほぼまっすぐ)ものは、まっすぐの線と同じなので使わない
+              const sg = segsOf(A); const v1 = { x: sg[0][1].x - sg[0][0].x, y: sg[0][1].y - sg[0][0].y }, v2 = { x: sg[1][1].x - sg[1][0].x, y: sg[1][1].y - sg[1][0].y };
+              const cosA = (v1.x * v2.x + v1.y * v2.y) / ((Math.hypot(v1.x, v1.y) * Math.hypot(v2.x, v2.y)) || 1);
+              if (cosA > Math.cos(15 * Math.PI / 180) || cosA < -0.2) continue;
+              if (costP(A) === 0) { found = { C: lb.C, K }; break; }
+            }
+            if (found) break;
+          }
+          if (found) { A.C = found.C; A.bend = found.K; } else { A.C = oldC; A.bend = oldB; }
+        }
+      }
       // かぶりの数を数え直す
       let n = (allItems.length - L.length) * 5;
-      for (let i = 0; i < L.length; i++) { n += selfC(L[i]); for (let j = i + 1; j < L.length; j++) n += pairC(L[i], L[j]); }
+      for (let i = 0; i < L.length; i++) { n += selfP(L[i]); for (let j = i + 1; j < L.length; j++) n += pairP(L[i], L[j]); }
       perimeterConfCount = n;
     }
     let stageNext = false, backTo = null;
@@ -21296,7 +21374,7 @@ pmi._lineFarPoint = null;
         }
       } else saLocked = true;
     }
-    perimeterCache = { key: cacheKey, allC: new Map(allItems.filter((it) => it.C).map((it) => [it.p.id, it.C])), fb: new Set(allItems.filter((it) => it.overlapFallback).map((it) => it.p.id)) };
+    perimeterCache = { key: cacheKey, allC: new Map(allItems.filter((it) => it.C).map((it) => [it.p.id, it.C])), fb: new Set(allItems.filter((it) => it.overlapFallback).map((it) => it.p.id)), bends: new Map(allItems.filter((it) => it.C && it.bend).map((it) => [it.p.id, it.bend])) };
     { const h = saHistory[saHistory.length - 1]; if (h && h.pending) { h.pending = false; h.cache = perimeterCache; } }
     // v606: いちばん良かった段階に戻すときは、そのときの並べ方をそのまま使う(並べ直すと結果が変わるため)
     if (backTo) { saLeaderStage = backTo.st; setSaZoom(backTo.z); if (backTo.cache) { perimeterCache = backTo.cache; perimeterConfCount = backTo.q; } saZoomRefScale = sceneScale; markRenderActive(600); }
@@ -24733,6 +24811,12 @@ pmi._lineFarPoint = null;
           // 距離判定に使うため、この画面座標をPMIにキャッシュしておく。
           pmi._modelScreenForHit = modelScreen;
           if (!modelScreen) continue;
+          // v607: 一斉表示で並べたものは、並べるときに決めた指す点へ結ぶ。指示線を折り曲げたものは、
+          // 記号からは折れ点へ向けて引き、折れ点から指す点まで引く
+          const perimOn = showAllAtOnce && pmi._perimeterPlaced && pmi._perimO;
+          const perimAim = perimOn && pmi._perimBend ? pmi._perimBend : null;
+          let realTip = null;
+          if (perimOn) { realTip = { x: pmi._perimO.x, y: pmi._perimO.y }; modelScreen = perimAim ? { x: perimAim.x, y: perimAim.y } : { x: realTip.x, y: realTip.y }; pmi._modelScreenForHit = realTip; }
           // v161: ユーザーから「注記の四角や〇の中点もしくは中心に向かう
           // 角度になるように書いてほしい」との指摘があった。それまでは
           // pmi._screen(マーカーの位置決めの基準点=タグ本体より左にある
@@ -24766,7 +24850,7 @@ pmi._lineFarPoint = null;
               try {
                 const cr = cvRect();
                 const tip = chooseWeldTip(pmi, mvp, targetX - cr.left, targetY - cr.top);
-                if (tip && tip.screen) { modelScreen = tip.screen; pmi._modelScreenForHit = modelScreen; }
+                if (tip && tip.screen && !perimOn) { modelScreen = tip.screen; pmi._modelScreenForHit = modelScreen; }
               } catch (e) { console.warn('chooseWeldTip failed:', e); }
               // v421: JIS Z 3021 4.6.1「矢は，基線に角度をもって連結し」「基線のいずれの端に連結してもよい」。
               // 矢(モデルの指示点→折れ点)が基線の伸びる側へ向かうと基線と重なるので、基線を反対側へ付け替える。
@@ -24897,7 +24981,7 @@ pmi._lineFarPoint = null;
           // v545: 指示線のモデル側の端がモデルから浮いて見える(画面上でモデルに届いていない)ときは、
           // 指示線の向きはそのままに、モデルに届くところまで延ばしてくっつける。
           // 延ばしても届かない(40px以内に無い)ときは、近く(10px以内)のモデルの点へ寄せる。
-          if (pmi.category === 'note') {
+          if (pmi.category === 'note' && !perimOn) {
             try {
               const snapped = snapLeaderTipToModel(mvp, modelScreen, clipX, clipY);
               if (snapped) { modelScreen = snapped; pmi._modelScreenForHit = modelScreen; }
@@ -24944,10 +25028,16 @@ pmi._lineFarPoint = null;
             '<line x1="' + modelScreen.x + '" y1="' + modelScreen.y + '" x2="' + clipX + '" y2="' + clipY + '"' +
             pmiFadeAttr(pmi) + ' stroke="' + colorToCss(pmi.id === selectedId ? COLOR_HIGHLIGHT : pmi._color) + '" stroke-width="' + connectorStrokeWidth + '" />'
           );
+          if (perimAim && realTip) {
+            svgLines.push('<line x1="' + realTip.x + '" y1="' + realTip.y + '" x2="' + modelScreen.x + '" y2="' + modelScreen.y + '"' +
+              pmiFadeAttr(pmi) + ' stroke="' + colorToCss(pmi.id === selectedId ? COLOR_HIGHLIGHT : pmi._color) + '" stroke-width="' + connectorStrokeWidth + '" />');
+          }
           // v421: JIS Z 3021 4.6.1「矢は…矢尻をもたなければならない」。溶接記号の矢の先(モデル側)に
           // 塗りつぶしの矢尻を付ける(注記2: 塗りつぶしが標準)。
           if (pmi.category === 'weld') {
-            const ax = clipX - modelScreen.x, ay = clipY - modelScreen.y, al = Math.hypot(ax, ay);
+            const tipP = (perimAim && realTip) ? realTip : modelScreen, fromP = (perimAim && realTip) ? modelScreen : { x: clipX, y: clipY };
+            const modelScreen0 = modelScreen; modelScreen = tipP; void modelScreen0;
+            const ax = fromP.x - modelScreen.x, ay = fromP.y - modelScreen.y, al = Math.hypot(ax, ay);
             if (al > 12) {
               const k2 = Math.max(0.7, Math.min(2.5, weldNotationScale()));
               const L = 10 * k2, W = 3.2 * k2, ux = ax / al, uy = ay / al;
