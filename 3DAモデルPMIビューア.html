@@ -1171,7 +1171,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v608</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v609</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1319,6 +1319,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v609: 「PMIを一斉表示」で、上下左右の列・行に加えて、モデルの内側の一番大きな空き(モデルも寸法も無い所)にも列(または行)を置くようにしました(真ん中)。列・行の中は、すき間を作らず1つの束として等間隔に並べます。列はモデルの上下の端の近くまでに限り、足りないときだけ少しずつ延ばします(遠くへ並べない)。</li>
         <li>v608: 「PMIを一斉表示」の並べ方を作り直しました。モデルのすぐ外側に左右の列と上下の行を用意し、どのPMIをどの位置に置くかを「指示線の長さの合計が一番短くなる」ように決めます(この結び方では、まっすぐな指示線どうしは交差しません)。列・行の中は、並び順のまま記号どうしのすき間をすべて同じにそろえて詰めます(等間隔)。入りきらないときは、外側にもう1列置く代わりに番号・記号を少し小さくします。計算は1回0.1秒以下で、回している間は並べ直さずに一緒に動かすので軽くなりました。</li>
         <li>v607: 「PMIを一斉表示」の処理を速くしました(1回の並べ直しにかける時間に上限を設け、置き場所の候補の計算を使い回し、記号を小さくする段階を3つまでにしました)。また、JIS Z 8322 4.(引出線は折り曲げてもよい・他の引出線などと交差させてはならない)に従い、まっすぐではどうしてもかぶる指示線は、1回折り曲げてかぶらない道筋で結ぶようにしました。</li>
         <li>v606: 「PMIを一斉表示」で、指している所から遠くへ置かないようにしました(指示線を400pxまで長くする段階をやめ、置き直しの範囲も短くしました)。小さくする段階のうち、かぶりが一番少なかった段階の並べ方を、並べ直さずにそのまま使うようにしました(並べ直すと結果が変わって、かえってかぶりが増えることがあったため)。</li>
@@ -21530,45 +21531,106 @@ pmi._lineFarPoint = null;
     const maxW = Math.max(...items.map((it) => it.g.w)), maxH = Math.max(...items.map((it) => it.g.h));
     const notes = items.filter((it) => it.p.category === 'note');
     const maxNW = notes.length ? Math.max(...notes.map((it) => it.g.w)) : 0, maxNH = notes.length ? Math.max(...notes.map((it) => it.g.h)) : 0;
-    const slots = [];
-    // 列(左右)の範囲: 部品表などで切れるところまで
-    const colRange = (R0) => { let lo = top0, hi = bottom0; for (const bb of banned) if (bb.y1 < 1e4 - 1 && R0.x1 > bb.x0 && R0.x0 < bb.x1) { if (bb.y0 > (top0 + bottom0) / 2) hi = Math.min(hi, bb.y0); else lo = Math.max(lo, bb.y1); } return [lo, hi]; };
-    const cols = [];
+    let slots = [], cols = [], bands = [], rows = [];
+    // 列(左右)の範囲: 部品表などで切れるところまで。さらに、モデルの上下の端から vext までに限る(遠くへ並べない)
+    let vext = 40;
+    const colRange = (R0) => {
+      let lo = Math.max(top0, my0 - vext), hi = Math.min(bottom0, my1 + vext);
+      for (const bb of banned) if (bb.y1 < 1e4 - 1 && R0.x1 > bb.x0 && R0.x0 < bb.x1 && hi > bb.y0 && lo < bb.y1) { if (bb.y0 > (lo + hi) / 2) hi = Math.min(hi, bb.y0); else lo = Math.max(lo, bb.y1); }
+      return [lo, hi];
+    };
     const addCol = (side, ring) => {
       const off = ring * (maxW + 40);
       const ax = side === 'L' ? Math.max(left0 + maxW, mx0 - GAPM - off) : Math.min(right0 - maxW, mx1 + GAPM + off);
       if (cols.some((c) => c.side === side && Math.abs(c.ax - ax) < maxW)) return; // 画面の端で前の列と重なる
       const R0 = side === 'L' ? { x0: ax - maxW, x1: ax } : { x0: ax, x1: ax + maxW };
+      // 左右の列が、置けない所(サブアセンブリの欄など)に横からかかるなら、その列は使わない
       const [lo, hi] = colRange(R0);
+      if (hi - lo < maxH) return;
       cols.push({ side, ring, ax, lo, hi });
       let idx = 0; for (let y = lo + 10; y <= hi - 10; y += FINE) slots.push({ kind: side, ring, ax, ay: y, pen: ring * 300, gk: side + ring, idx: idx++ });
     };
-    addCol('L', 0); addCol('R', 0);
-    const bands = [], rows = [];
-    if (items.length) {
+    // v609: 「真ん中」: モデルの外形の内側の、モデルも寸法も無い一番大きな空き(四角)。そこにも列(または行)を置く
+    const mids = [];
+    {
+      const gx0 = Math.max(0, Math.floor(mx0 / CS)), gx1 = Math.min(GW - 1, Math.floor(mx1 / CS)), gy0 = Math.max(0, Math.floor(my0 / CS)), gy1 = Math.min(GH - 1, Math.floor(my1 / CS));
+      const W = gx1 - gx0 + 1, H = gy1 - gy0 + 1;
+      if (W > 4 && H > 4) {
+        const blk = new Uint8Array(W * H);
+        const D = 3; // モデルから 3升目(12px)は離す
+        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (mGrid[(y + gy0) * GW + (x + gx0)]) {
+          for (let yy = Math.max(0, y - D); yy <= Math.min(H - 1, y + D); yy++) for (let xx = Math.max(0, x - D); xx <= Math.min(W - 1, x + D); xx++) blk[yy * W + xx] = 1;
+        }
+        const markR = (r) => { for (let y = Math.max(0, Math.floor(r.y0 / CS) - gy0 - 1); y <= Math.min(H - 1, Math.floor(r.y1 / CS) - gy0 + 1); y++) for (let x = Math.max(0, Math.floor(r.x0 / CS) - gx0 - 1); x <= Math.min(W - 1, Math.floor(r.x1 / CS) - gx0 + 1); x++) blk[y * W + x] = 1; };
+        for (const r of dimRects) markR(r);
+        for (const [a, b] of dimSegs) { const L = Math.hypot(b.x - a.x, b.y - a.y), nn = Math.ceil(L / 2); for (let k = 0; k <= nn; k++) { const x = a.x + (b.x - a.x) * k / nn, y = a.y + (b.y - a.y) * k / nn; markR({ x0: x, x1: x, y0: y, y1: y }); } }
+        for (const it of items) markR({ x0: it.O.x - 6, x1: it.O.x + 6, y0: it.O.y - 6, y1: it.O.y + 6 });
+        // 一番大きな空きの四角(ヒストグラム法)
+        const hgt = new Int32Array(W);
+        let best = null;
+        for (let y = 0; y < H; y++) {
+          for (let x = 0; x < W; x++) hgt[x] = blk[y * W + x] ? 0 : hgt[x] + 1;
+          const st = [];
+          for (let x = 0; x <= W; x++) {
+            const hh = x < W ? hgt[x] : 0;
+            while (st.length && hgt[st[st.length - 1]] >= hh) {
+              const top = st.pop(), h2 = hgt[top], left = st.length ? st[st.length - 1] + 1 : 0, w2 = x - left;
+              const wPx = w2 * CS, hPx = h2 * CS;
+              const okV = wPx >= maxW + 8 && hPx >= 2 * (maxH + GAPL), okH = hPx >= maxH + 8 && wPx >= 2 * (maxW + GAPL);
+              if ((okV || okH) && (!best || wPx * hPx > best.a)) best = { a: wPx * hPx, x0: (left + gx0) * CS, x1: (left + w2 + gx0) * CS, y0: (y - h2 + 1 + gy0) * CS, y1: (y + 1 + gy0) * CS, okV, okH };
+            }
+            st.push(x);
+          }
+        }
+        if (best) {
+          const vert = best.okV && (!best.okH || (best.y1 - best.y0) >= (best.x1 - best.x0));
+          if (vert) mids.push({ kind: 'MV', ax: (best.x0 + best.x1) / 2, ay: (best.y0 + best.y1) / 2, lo: best.y0 + 4, hi: best.y1 - 4 });
+          else mids.push({ kind: 'MH', ax: (best.x0 + best.x1) / 2, ay: (best.y0 + best.y1) / 2, lo: best.x0 + 4, hi: best.x1 - 4 });
+        }
+      }
+    }
+    const build = () => {
+      slots = []; cols = []; bands = []; rows = [];
+      addCol('L', 0); addCol('R', 0);
+      for (const md of mids) { let idx = 0; for (let v = md.lo + 10; v <= md.hi - 10; v += FINE) slots.push(md.kind === 'MV' ? { kind: 'MV', ring: 0, ax: md.ax, ay: v, pen: 0, gk: 'MV0', idx: idx++ } : { kind: 'MH', ring: 0, ax: v, ay: md.ay, pen: 0, gk: 'MH0', idx: idx++ }); }
       const maxNH = maxH, maxNW = Math.max(...items.map((it) => it.g.w));
-      const xLin = cols.find((c) => c.side === 'L') ? cols.find((c) => c.side === 'L').ax : left0, xRin = cols.find((c) => c.side === 'R') ? cols.find((c) => c.side === 'R').ax : right0;
+      const cL = cols.find((c) => c.side === 'L'), cR = cols.find((c) => c.side === 'R');
+      const xLin = cL ? cL.ax : left0, xRin = cR ? cR.ax : right0;
       const yT = Math.max(top0 + maxNH, my0 - GAPM), yB = Math.min(bottom0 - maxNH, my1 + GAPM);
       for (const [kind, ay] of [['T', yT], ['B', yB]]) {
         let lo = xLin + 12, hi = xRin - 12;
         const RB = kind === 'T' ? { y0: ay - maxNH, y1: ay } : { y0: ay, y1: ay + maxNH };
-        for (const bb of banned) if (bb.y1 < 1e4 - 1 && RB.y1 > bb.y0 && RB.y0 < bb.y1) { if (bb.x0 > (left0 + right0) / 2) hi = Math.min(hi, bb.x0); else lo = Math.max(lo, bb.x1); }
+        for (const bb of banned) if (bb.y1 < 1e4 - 1 && RB.y1 > bb.y0 && RB.y0 < bb.y1 && hi > bb.x0 && lo < bb.x1) { if (bb.x0 > (lo + hi) / 2) hi = Math.min(hi, bb.x0); else lo = Math.max(lo, bb.x1); }
         if (hi - lo < maxNW) continue;
         bands.push({ x0: lo, x1: hi, y0: RB.y0, y1: RB.y1 });
         rows.push({ kind, ay, lo, hi });
         let idx = 0; for (let x = lo + 10; x <= hi - 10; x += FINE) slots.push({ kind, ring: 0, ax: x, ay, pen: 0, gk: kind + '0', idx: idx++ });
       }
-    }
-    // 入りきるか(大きさの合計)を見て、足りなければ外側にもう1列
-    { const capC = cols.reduce((a, c) => a + (c.hi - c.lo), 0), capR = rows.reduce((a, r) => a + (r.hi - r.lo), 0);
+    };
+    // 入りきるか(大きさの合計)を見て: まず列を上下に少しずつ延ばす → それでも足りなければ記号を小さくする → 最後に外側にもう1列
+    {
       const need = items.reduce((a, it) => a + it.g.h + GAPL, 0) * 0.62 + items.reduce((a, it) => a + it.g.w + GAPL, 0) * 0.38;
-      const capAll = capC + capR;
-      // 入りきらないときは、外側にもう1列置く代わりに、まず番号・記号を少し小さくする(外側の列の指示線は内側の記号をまたぐため)
+      const capOf = () => cols.reduce((a, c) => a + (c.hi - c.lo), 0) + rows.reduce((a, r) => a + (r.hi - r.lo), 0) + mids.reduce((a, m) => a + (m.hi - m.lo), 0);
+      for (;;) {
+        build();
+        if (need <= capOf() * 0.85) break;
+        const full = my0 - vext <= top0 && my1 + vext >= bottom0;
+        if (full) break;
+        vext += 60;
+      }
+      const capAll = capOf();
       if (need > capAll * 0.92 && saZoom > 0.7 + 1e-3 && !moving) { setSaZoom(Math.max(0.7, saZoom * 0.9)); markRenderActive(400); return; }
-      if (need < capAll * 0.55 && saZoom < 1 - 1e-3 && !moving) { setSaZoom(Math.min(1, saZoom / 0.9)); markRenderActive(400); return; }
-      if (need > capAll * 0.92) { addCol('L', 1); addCol('R', 1); } }
+      if (need < capAll * 0.5 && saZoom < 1 - 1e-3 && !moving) { setSaZoom(Math.min(1, saZoom / 0.9)); markRenderActive(400); return; }
+      if (need > capAll * 0.92) { addCol('L', 1); addCol('R', 1); }
+    }
     const placeAt = (it, kind, ax, ay) => {
       const w = it.g.w, h = it.g.h;
+      if (kind === 'MV' || kind === 'MH') { // 真ん中: 記号は枠の中心。指示線は指す点の側の端から
+        const sg = it.O.x >= ax ? 1 : -1;
+        if (it.knee) return { C: { x: ax, y: ay }, S: { x: ax + sg * it.knee.ax, y: ay + it.knee.ky } };
+        if (kind === 'MV') return { C: { x: ax, y: ay }, S: { x: ax + sg * w / 2, y: ay } };
+        return { C: { x: ax, y: ay }, S: { x: ax, y: ay + (it.O.y >= ay ? h / 2 : -h / 2) } };
+      }
       // 列: 記号は列の内側の線にそろえ、上下は枠の中心に置く。溶接記号の指示線は、内側の基線の端(折れ点)から出る
       if (kind === 'L') return it.knee ? { C: { x: ax - w / 2, y: ay }, S: { x: ax - w / 2 + it.knee.ax, y: ay + it.knee.ky } } : { C: { x: ax - w / 2, y: ay }, S: { x: ax, y: ay } };
       if (kind === 'R') return it.knee ? { C: { x: ax + w / 2, y: ay }, S: { x: ax + w / 2 - it.knee.ax, y: ay + it.knee.ky } } : { C: { x: ax + w / 2, y: ay }, S: { x: ax, y: ay } };
@@ -21587,12 +21649,12 @@ pmi._lineFarPoint = null;
     // 枠の間引き(列・行ごと): 記号の大きさに合わせて、使える枠を何個おきにするか
     const avgH = items.reduce((a, it) => a + it.g.h, 0) / n, avgNW = items.reduce((a, it) => a + it.g.w, 0) / n;
     const stride = {};
-    for (const sl of allSlots) if (stride[sl.gk] == null) stride[sl.gk] = Math.max(1, Math.round(((sl.kind === 'L' || sl.kind === 'R') ? avgH + GAPL : avgNW + GAPL) / FINE));
+    for (const sl of allSlots) if (stride[sl.gk] == null) stride[sl.gk] = Math.max(1, Math.round(((sl.kind === 'L' || sl.kind === 'R' || sl.kind === 'MV') ? avgH + GAPL : avgNW + GAPL) / FINE));
     let groups = null, assign = null, cost = null, slotsA = null;
     const placeGroup = (G, order) => {
-      const vertical = G.kind === 'L' || G.kind === 'R';
-      const range = vertical ? (cols.find((c) => c.side === G.kind && Math.abs(c.ax - G.ax) < 1) || { lo: top0, hi: bottom0 }) : (rows.find((r) => r.kind === G.kind) || { lo: left0, hi: right0 });
-      const size = (e) => vertical ? e.it.g.h : (G.kind === 'T' || G.kind === 'B' ? e.it.g.w : e.it.g.h);
+      const vertical = G.kind === 'L' || G.kind === 'R' || G.kind === 'MV';
+      const range = (G.kind === 'MV' || G.kind === 'MH') ? (mids.find((m) => m.kind === G.kind) || { lo: top0, hi: bottom0 }) : vertical ? (cols.find((c) => c.side === G.kind && Math.abs(c.ax - G.ax) < 1) || { lo: top0, hi: bottom0 }) : (rows.find((r) => r.kind === G.kind) || { lo: left0, hi: right0 });
+      const size = (e) => vertical ? e.it.g.h : e.it.g.w;
       const list = order;
       // 束に分ける: 前の束の端から次の希望位置まで、記号2つ分以上あいていれば別の束
       const clusters = [];
@@ -21601,7 +21663,7 @@ pmi._lineFarPoint = null;
         if (c) {
           const span = c.list.reduce((a, x) => a + size(x) + GAPL, 0);
           const cStart = c.mean - span / 2;
-          if (e.pos - (cStart + span) < 2 * (size(e) + GAPL)) { c.list.push(e); c.mean = c.list.reduce((a, x) => a + x.pos, 0) / c.list.length; continue; }
+          if (true || e.pos - (cStart + span) < 2 * (size(e) + GAPL)) { /* v609: 列・行は1つの束(すき間なく等間隔)にする */ c.list.push(e); c.mean = c.list.reduce((a, x) => a + x.pos, 0) / c.list.length; continue; }
         }
         clusters.push({ list: [e], mean: e.pos });
       }
@@ -21649,9 +21711,9 @@ pmi._lineFarPoint = null;
     // 置き場所そのものの悪さ(どのPMIを置いても同じ): 寸法・モデル・部品表にかかる枠は使わない。
     // 指示線ごとの罰は付けない(付けると、指示線の長さの合計が最小にならず、交差が生まれるため)
     const slotPen = (sl) => {
-      const w = (sl.kind === 'L' || sl.kind === 'R') ? maxW : avgNW, h = (sl.kind === 'L' || sl.kind === 'R') ? avgH : maxH;
+      const w = (sl.kind === 'L' || sl.kind === 'R') ? maxW : avgNW, h = (sl.kind === 'L' || sl.kind === 'R' || sl.kind === 'MV') ? avgH : maxH;
       const R = sl.kind === 'L' ? { x0: sl.ax - w, x1: sl.ax, y0: sl.ay - h / 2, y1: sl.ay + h / 2 } : sl.kind === 'R' ? { x0: sl.ax, x1: sl.ax + w, y0: sl.ay - h / 2, y1: sl.ay + h / 2 }
-        : sl.kind === 'T' ? { x0: sl.ax - w / 2, x1: sl.ax + w / 2, y0: sl.ay - h, y1: sl.ay } : { x0: sl.ax - w / 2, x1: sl.ax + w / 2, y0: sl.ay, y1: sl.ay + h };
+        : sl.kind === 'T' ? { x0: sl.ax - w / 2, x1: sl.ax + w / 2, y0: sl.ay - h, y1: sl.ay } : sl.kind === 'B' ? { x0: sl.ax - w / 2, x1: sl.ax + w / 2, y0: sl.ay, y1: sl.ay + h } : { x0: sl.ax - w / 2, x1: sl.ax + w / 2, y0: sl.ay - h / 2, y1: sl.ay + h / 2 };
       if (banned.some((b) => ov(R, b, 0))) return BIG;
       let c = 0;
       if (rectOnModel(R)) c += 800;
@@ -21706,14 +21768,14 @@ pmi._lineFarPoint = null;
       if (j < 0 || cost[i][j] >= BIG) { items[i].C = null; continue; }
       const sl = slotsA[j], gk = sl.kind + sl.ring;
       if (!groups.has(gk)) groups.set(gk, { kind: sl.kind, ax: sl.ax, ay: sl.ay, list: [] });
-      groups.get(gk).list.push({ it: items[i], pos: (sl.kind === 'L' || sl.kind === 'R') ? sl.ay : sl.ax });
+      groups.get(gk).list.push({ it: items[i], pos: (sl.kind === 'L' || sl.kind === 'R' || sl.kind === 'MV') ? sl.ay : sl.ax });
     }
     for (const G of groups.values()) { G.list.sort((a, b) => a.pos - b.pos); placeGroup(G, G.list); }
     // 入りきらなかった列・行は、枠を間引いて(=そこへ割り当てる数を減らして)もう一度
     let over = false;
     for (const [gk, G] of groups) {
-      const vertical = G.kind === 'L' || G.kind === 'R';
-      const range = vertical ? (cols.find((c) => c.side === G.kind && Math.abs(c.ax - G.ax) < 1) || { lo: top0, hi: bottom0 }) : (rows.find((r) => r.kind === G.kind) || { lo: left0, hi: right0 });
+      const vertical = G.kind === 'L' || G.kind === 'R' || G.kind === 'MV';
+      const range = (G.kind === 'MV' || G.kind === 'MH') ? (mids.find((m) => m.kind === G.kind) || { lo: top0, hi: bottom0 }) : vertical ? (cols.find((c) => c.side === G.kind && Math.abs(c.ax - G.ax) < 1) || { lo: top0, hi: bottom0 }) : (rows.find((r) => r.kind === G.kind) || { lo: left0, hi: right0 });
       const span = G.list.reduce((a, e) => a + (vertical ? e.it.g.h : e.it.g.w) + GAPL, 0) - GAPL;
       if (span > range.hi - range.lo + 0.5) { stride[gk] += 1; over = true; }
     }
