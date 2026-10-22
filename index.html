@@ -133,7 +133,7 @@
   }
   /* v449: 他CADのPMIは記録された図形をそのまま描くので、文字列がない限りタグは出さない */
   .pmi-tag.is-recorded:not(.has-text) { display: none; }
-  body.showall-on .pmi-marker .pmi-tag { zoom: var(--sa-zoom, 1); } /* v602 */
+  body.showall-on .pmi-marker.is-note .pmi-tag, body.showall-on .pmi-marker.is-weld .pmi-tag { zoom: var(--sa-zoom, 1); } /* v602/v603: 寸法値は縮めない */
   .pmi-tag {
     font-family: var(--font-mono); font-size: 14px; font-weight: 500;
     padding: 3px 7px; border-radius: 5px; white-space: nowrap;
@@ -1171,7 +1171,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v602</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v603</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1319,6 +1319,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v603: 「PMIを一斉表示」の仕上げとして、かぶっている2つの番号・記号は、置き場所を入れ替える(上下逆・左右逆にする)、片方を少し上下左右にずらす、指している所のすぐ横などの空きへ動かす、を試し、かぶりが減るならそうするようにしました(指示線が交差していた「F3 B4 G5」と「B4 G5」など)。</li>
         <li>v602: 「PMIを一斉表示」で、必ずすべてのPMIを出すようにしました。寸法線・寸法補助線も、番号・記号を重ねない・指示線を交差させない対象に加えました。重ならずに置けないものがあるときは、まず指示線を少し長く(400pxまで)許し、それでも足りなければ番号・記号を少しずつ小さく(最小0.7倍)して並べ直し、かぶりが一番少なかった段階を使います。外周に順番どおり並べた並べ方とも比べ、かぶりの少ない方を使います。避けられないかぶりが残るときは、その数を画面上部に表示します。</li>
         <li>v601: 「PMIを一斉表示」で、かぶりを一切出さないようにしました。記号どうしの重なり、指示線どうしの交差、指示線が他の記号・寸法値・モデルの上を通ること、記号が寸法値・モデル・リボン・部品表・画面の外にかかることを、どの向きでも最後に必ず確かめ、かぶるものは画面全体からかぶらない所を探して移します。指示線の長さは240pxまでにし、指している所から遠くへは置きません。どうしても置けないものはその見え方では出さず、件数を画面上部に表示します(拡大すると出ます)。部品表やリボンの大きさが変わったときも並べ直します。</li>
         <li>v600: 「PMIを一斉表示」で、近くの空いている所へ置く処理を、輪に並べたあとに何回か繰り返すようにしました(近くへ移した分だけ輪を詰め直すと、輪から延びる指示線が減って近くの空きが増えるため)。探す範囲も広げました。リボン・部品表・サブアセンブリ名の欄・画面の外には記号を絶対に置かず、どこにも置けないものはその視点では出しません。一斉表示にする前に隠れていた記号の指示線だけが残って画面の外へ延びて見えていた問題も直しました。</li>
@@ -21152,6 +21153,77 @@ pmi._lineFarPoint = null;
       else { for (const [it, C] of cur) it.C = C; for (const [it, f] of fbCur) it.overlapFallback = f; perimeterRingWon = 0; }
       if (nRing < nCur) { const L = allItems.filter((it) => it.C); for (const it of allItems) it.overlapFallback = false; void L; }
       perimeterConfCount = Math.min(nRing, nCur);
+    }
+    // v603: 仕上げ: かぶっている2つは、置き場所を入れ替えたり(上下逆にする)、片方を少しずらしたり、
+    // 指している所のすぐ横などの空きへ動かしたりして、かぶりが減るならそうする
+    if (!isUserViewMoving(performance.now())) {
+      const tP = performance.now() + 1500;
+      const pairC = (A, B) => {
+        const RA = rectOf(A), RB = rectOf(B), [a, b] = segOf(A), [c, d] = segOf(B);
+        let n = 0;
+        if (RA.x0 < RB.x1 + 2 && RA.x1 > RB.x0 - 2 && RA.y0 < RB.y1 + 2 && RA.y1 > RB.y0 - 2) n += 2;
+        if (segTouchesRect(a, b, RB, 2) || segTouchesRect(c, d, RA, 2)) n++;
+        if (segCrossesSeg(a, b, c, d) || segCrossesSeg(c, d, a, b)) n++;
+        return n;
+      };
+      const selfC = (A) => {
+        const RA = rectOf(A), [a, b] = segOf(A);
+        let n = 0;
+        if (!inBounds(A)) n += 3;
+        if (Math.hypot(a.x - b.x, a.y - b.y) > PERIMETER_MAX_LEADER_PX * 3) n += 1;
+        if (hitsDimLines(RA, a, b) || dimRects.some((d) => (RA.x0 < d.x1 && RA.x1 > d.x0 && RA.y0 < d.y1 && RA.y1 > d.y0) || segTouchesRect(a, b, d, 1))) n++;
+        if ((segHitsModelFn && segHitsModelFn(a, b, 22)) || (rectHitsModelFn && rectHitsModelFn(RA))) n++;
+        return n;
+      };
+      const L = allItems.filter((it) => it.C);
+      const costOf = (A, excl) => { let n = selfC(A); for (const o of L) if (o !== A && o !== excl) n += pairC(A, o); return n; };
+      const lenOf2 = (A) => { const [a, b] = segOf(A); return Math.hypot(a.x - b.x, a.y - b.y); };
+      const cmap = new Map();
+      const candsOf = (A) => { let c = cmap.get(A); if (!c) { c = staticCandsFn ? staticCandsFn(A, PERIMETER_MAX_LEADER_PX * 1.7).slice(0, 80).map((cd) => cd.C) : []; cmap.set(A, c); } return c; };
+      const tryMove = (A) => {
+        const old = A.C, base = costOf(A), baseLen = lenOf2(A);
+        let best = null, bestC = base, bestLen = baseLen;
+        const opts = [];
+        for (const k of [1, 2, 3, 4, 6]) for (const [dx, dy] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) opts.push({ x: old.x + dx * k * (dy ? A.g.h * 0.5 : A.g.w * 0.35), y: old.y + dy * k * A.g.h * 0.5 });
+        for (const C of candsOf(A)) opts.push(C);
+        for (const C of opts) {
+          A.C = C;
+          const c = costOf(A), l = lenOf2(A);
+          if (c < bestC || (c === bestC && c < base && l < bestLen)) { bestC = c; best = C; bestLen = l; }
+          if (performance.now() > tP) break;
+        }
+        A.C = best || old;
+        return !!best;
+      };
+      for (let round = 0; round < 6 && performance.now() < tP; round++) {
+        let improved = false;
+        // かぶっている組を探す
+        for (let i = 0; i < L.length && performance.now() < tP; i++) {
+          for (let j = i + 1; j < L.length && performance.now() < tP; j++) {
+            const A = L[i], B = L[j];
+            if (!pairC(A, B)) continue;
+            // 1) 入れ替え(上下逆・左右逆)
+            const before = costOf(A, B) + costOf(B, A) + pairC(A, B);
+            const ca = A.C, cb = B.C;
+            // 大きさが違うので、端をそろえる向きに入れ替える(列なら左右の端、行なら上下の端はそのまま中心だけ入れ替え)
+            A.C = { x: cb.x, y: cb.y }; B.C = { x: ca.x, y: ca.y };
+            const after = costOf(A, B) + costOf(B, A) + pairC(A, B);
+            if (after < before) { improved = true; continue; }
+            A.C = ca; B.C = cb;
+            // 2) どちらかを少しずらす・近くの空きへ動かす(指示線の長い方から)
+            const first = lenOf2(A) >= lenOf2(B) ? A : B, second = first === A ? B : A;
+            if (tryMove(first)) { improved = true; continue; }
+            if (tryMove(second)) { improved = true; continue; }
+          }
+        }
+        // 3) 自分だけのかぶり(寸法・モデルの上を通る)も、ずらして減るならずらす
+        for (const A of L) { if (performance.now() > tP) break; if (selfC(A) && tryMove(A)) improved = true; }
+        if (!improved) break;
+      }
+      // かぶりの数を数え直す
+      let n = (allItems.length - L.length) * 5;
+      for (let i = 0; i < L.length; i++) { n += selfC(L[i]); for (let j = i + 1; j < L.length; j++) n += pairC(L[i], L[j]); }
+      perimeterConfCount = n;
     }
     let stageNext = false, backTo = null;
     if (!movingNow && !saLocked) {
