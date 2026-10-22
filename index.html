@@ -133,6 +133,7 @@
   }
   /* v449: 他CADのPMIは記録された図形をそのまま描くので、文字列がない限りタグは出さない */
   .pmi-tag.is-recorded:not(.has-text) { display: none; }
+  body.showall-on .pmi-marker .pmi-tag { zoom: var(--sa-zoom, 1); } /* v602 */
   .pmi-tag {
     font-family: var(--font-mono); font-size: 14px; font-weight: 500;
     padding: 3px 7px; border-radius: 5px; white-space: nowrap;
@@ -1170,7 +1171,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v601</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v602</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1318,6 +1319,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v602: 「PMIを一斉表示」で、必ずすべてのPMIを出すようにしました。寸法線・寸法補助線も、番号・記号を重ねない・指示線を交差させない対象に加えました。重ならずに置けないものがあるときは、まず指示線を少し長く(400pxまで)許し、それでも足りなければ番号・記号を少しずつ小さく(最小0.7倍)して並べ直し、かぶりが一番少なかった段階を使います。外周に順番どおり並べた並べ方とも比べ、かぶりの少ない方を使います。避けられないかぶりが残るときは、その数を画面上部に表示します。</li>
         <li>v601: 「PMIを一斉表示」で、かぶりを一切出さないようにしました。記号どうしの重なり、指示線どうしの交差、指示線が他の記号・寸法値・モデルの上を通ること、記号が寸法値・モデル・リボン・部品表・画面の外にかかることを、どの向きでも最後に必ず確かめ、かぶるものは画面全体からかぶらない所を探して移します。指示線の長さは240pxまでにし、指している所から遠くへは置きません。どうしても置けないものはその見え方では出さず、件数を画面上部に表示します(拡大すると出ます)。部品表やリボンの大きさが変わったときも並べ直します。</li>
         <li>v600: 「PMIを一斉表示」で、近くの空いている所へ置く処理を、輪に並べたあとに何回か繰り返すようにしました(近くへ移した分だけ輪を詰め直すと、輪から延びる指示線が減って近くの空きが増えるため)。探す範囲も広げました。リボン・部品表・サブアセンブリ名の欄・画面の外には記号を絶対に置かず、どこにも置けないものはその視点では出しません。一斉表示にする前に隠れていた記号の指示線だけが残って画面の外へ延びて見えていた問題も直しました。</li>
         <li>v599: 「PMIを一斉表示」で、モデルのすき間など指している所のすぐ近くに空いている所(モデル・ほかの記号に重ならず、指示線がモデルや記号の上を通らず、ほかの指示線とも交差しない所)があれば、輪ではなくそこへ置くようにしました。近くへ移した分だけ輪の並びを詰め直し、各辺に入りきるまで輪を広げるので、指示線が短くなり、四隅で記号が重なることもなくなります。</li>
@@ -15161,6 +15163,7 @@
   });
   document.getElementById('showAllAtOnceBtn').addEventListener('click', (e) => {
     showAllAtOnce = !showAllAtOnce;
+    document.body.classList.toggle('showall-on', showAllAtOnce); setSaZoom(1); saZoomRefScale = 0; saLeaderStage = 0; saHistory = []; saLocked = false; // v602
     { const nt = document.getElementById('perimeterHiddenNote'); if (nt && !showAllAtOnce) nt.style.display = 'none'; } // v601
     // v597: 一斉表示では番号・記号をモデルの外側に並べるので、今の向きのままモデルを小さめに表示して周りに余白を作る。
     // 解除したら、一斉表示にする前の見え方に戻す。
@@ -15168,7 +15171,7 @@
       for (const q of pmiList) if (q._perimeterHidden) { q._perimeterHidden = false; const e2 = markerEls.get(q.id); if (e2) e2.style.visibility = ''; } // v600
       if (showAllAtOnce) {
         showAllPrevView = { r: { ...sceneRotation }, s: sceneScale, t: { ...sceneTranslation } };
-        fitToView(true, 0.8);
+        fitToView(true, 1.15);
       } else if (showAllPrevView) {
         sceneRotation = showAllPrevView.r; sceneScale = showAllPrevView.s; sceneTranslation = showAllPrevView.t;
         showAllPrevView = null;
@@ -20484,9 +20487,24 @@ pmi._lineFarPoint = null;
   // 並べ、指示線で結ぶ(図面の照合番号の並べ方)。指している点の向き(モデルの中心から見た方向)で並べる辺を決め、
   // 辺ごとに指している点の順に並べるので、同じ辺の指示線どうしは交差しない。番号・記号どうしは重ならない。
   let perimeterCache = null;
+  let saZoom = 1, saZoomRefScale = 0; // v602: 一斉表示で全部を重ならずに置くための、番号・記号の縮小率
+  const SA_ZOOM_MIN = 0.7;
+  function setSaZoom(z) { saZoom = z; document.body.style.setProperty('--sa-zoom', String(z)); perimeterCache = null; }
+  let saHistory = [], saLocked = false, saRefRot = null; // v602: 段階ごとの結果(置けなかった数)。いちばん良かった段階に戻すため
+  let perimeterRingWon = 0, perimeterConfCount = 0;
+  let saLeaderStage = 0; // v602: 置けないものがあるとき、まず指示線を少し長く(240→400px)許してから、記号を縮める
   const PERIMETER_MAX_LEADER_PX = 240; // v601: 一斉表示で、指示線(記号から指している所まで)の長さの上限
   function perimeterLayoutAll(allScreenPmis, mvp) {
     if (!showAllAtOnce) return;
+    const MAXL = saLeaderStage ? 400 : PERIMETER_MAX_LEADER_PX;
+    // v602: 拡大・縮小したら、番号・記号の大きさを元に戻してから並べ直す(拡大すれば元の大きさで入ることがある)
+    { // v602: 向きを変えたら、記号の大きさ・指示線の長さの段階を最初からやり直す
+      const r = sceneRotation, q0 = saRefRot;
+      const dot = q0 ? Math.abs(r.x * q0.x + r.y * q0.y + r.z * q0.z + r.w * q0.w) : 1;
+      if (!isUserViewMoving(performance.now()) && q0 && dot < 0.999 && (saZoom < 1 || saLeaderStage || saLocked)) { setSaZoom(1); saLeaderStage = 0; saHistory = []; saLocked = false; }
+      if (!isUserViewMoving(performance.now())) saRefRot = { x: r.x, y: r.y, z: r.z, w: r.w };
+    }
+    if ((saZoom < 1 || saLeaderStage) && saZoomRefScale && !isUserViewMoving(performance.now()) && Math.abs(sceneScale / saZoomRefScale - 1) > 0.15) { setSaZoom(1); saZoomRefScale = 0; saLeaderStage = 0; saHistory = []; saLocked = false; }
     const cover = getScreenCover(mvp);
     const cw = cvSize().w, ch = cvSize().h;
     const top0 = Math.max(8, getRibbonHeightPx() - cvRect().top + 8), left0 = 8, right0 = cw - 8, bottom0 = ch - 8;
@@ -20547,14 +20565,24 @@ pmi._lineFarPoint = null;
         const r = q._dimFinalRect;
         if (r) dimRects.push({ x0: r.left - cr1.left - 2, x1: r.right - cr1.left + 2, y0: r.top - cr1.top - 2, y1: r.bottom - cr1.top + 2 });
       } }
+    // v602: 寸法線・寸法補助線(番号・記号を重ねない、指示線と交差させない)
+    let dimSegs = [];
+    try { dimSegs = collectDimScreenSegs(allScreenPmis, mvp).filter((sg) => sg && sg[0] && sg[1]); } catch (e) { dimSegs = []; }
+    const hitsDimLines = (R, a, b) => {
+      for (const [p1, p2] of dimSegs) {
+        if (R && segTouchesRect(p1, p2, R, 1)) return true;
+        if (a && (segCrossesSeg(a, b, p1, p2) || segCrossesSeg(p1, p2, a, b))) return true;
+      }
+      return false;
+    };
     const cacheKey = Array.from(mvp, (v) => v.toFixed(4)).join(',') + '|' + cw + 'x' + ch + '|' + top0 + '|' + banned.map((b) => [b.x0, b.y0, b.x1, b.y1].map(Math.round).join(',')).join(';') + '|' + dimRects.map((b) => [b.x0, b.y0].map(Math.round).join(',')).join(';') + '|' + allItems.map((it) => it.p.id + ':' + Math.round(it.g.w) + 'x' + Math.round(it.g.h)).join(',');
     const cacheOk = !!(perimeterCache && perimeterCache.key === cacheKey);
     const applyPerimeter = () => {
     { // v601: 重ならずに置ける所が無く出していないPMIの件数を知らせる
-      const nHid = allItems.filter((it) => !it.C).length;
+      const nHid = perimeterConfCount;
       let note = document.getElementById('perimeterHiddenNote');
       if (!note) { note = document.createElement('div'); note.id = 'perimeterHiddenNote'; note.style.cssText = 'position:fixed; left:50%; transform:translateX(-50%); z-index:60; font-size:12px; padding:4px 8px; border-radius:6px; background:rgba(0,0,0,0.6); color:#ffd479; pointer-events:none;'; document.body.appendChild(note); }
-      note.textContent = nHid ? ('重ならずに置ける所が無いため、この見え方では' + nHid + '件のPMIを出していません(拡大すると出ます)') : '';
+      note.textContent = nHid ? ('この見え方では、どうしても避けられないかぶりが' + nHid + 'か所あります(拡大するか向きを変えると減ります)') : '';
       note.style.display = nHid ? '' : 'none';
       note.style.top = (getRibbonHeightPx() + 6) + 'px';
     }
@@ -20574,7 +20602,7 @@ pmi._lineFarPoint = null;
     }
     };
     if (cacheOk && perimeterCache.allC) {
-      for (const it of allItems) { const C = perimeterCache.allC.get(it.p.id); if (C) it.C = C; }
+      for (const it of allItems) { const C = perimeterCache.allC.get(it.p.id); if (C) it.C = C; if (perimeterCache.fb && perimeterCache.fb.has(it.p.id)) it.overlapFallback = true; }
       applyPerimeter();
       return;
     }
@@ -20617,6 +20645,7 @@ pmi._lineFarPoint = null;
             if (dimRects.some((d) => segTouchesRect(a, b, d, 1))) continue; // v601: 指示線を寸法値の上に通さない
             if (rectHitsModel(Rm)) continue;
             if (segHitsModel(a, b, 22)) continue;
+            if (hitsDimLines(Rm, a, b)) continue; // v602
             const c = r + (Math.abs(uy) > 0.92 || Math.abs(ux) > 0.92 ? 0 : 4);
             if (c < bestC) { bestC = c; best = { C, R, s: [a, b] }; }
           }
@@ -20625,7 +20654,8 @@ pmi._lineFarPoint = null;
         return best;
       };
       // v601: ほかの記号を考えずに、モデル・寸法値・リボン・部品表・画面の外だけを避けた置き場所の候補(指示線の短い順)
-      const staticCands = (it, maxR) => {
+      const staticCands = (it, maxR, keepEnd0) => {
+        const keepEnd = keepEnd0 || 22;
         const out = [];
         for (let r = 10; r <= maxR; r += 12) for (let k = 0; k < ANG; k++) {
           const ang = (k / ANG) * Math.PI * 2, ux = Math.cos(ang), uy = Math.sin(ang);
@@ -20638,10 +20668,13 @@ pmi._lineFarPoint = null;
           if (allO.some((o) => o !== it.O && o.x > Rm.x0 && o.x < Rm.x1 && o.y > Rm.y0 && o.y < Rm.y1)) continue;
           const [a, b] = nearSeg(C, it.g, it.O);
           if (dimRects.some((d) => segTouchesRect(a, b, d, 1))) continue;
-          if (rectHitsModel(Rm) || segHitsModel(a, b, 22)) continue;
+          if (rectHitsModel(Rm) || segHitsModel(a, b, keepEnd)) continue;
+          if (hitsDimLines(Rm, a, b)) continue; // v602
           out.push({ C, R, s: [a, b], c: r + (Math.abs(uy) > 0.92 || Math.abs(ux) > 0.92 ? 0 : 4) });
         }
         out.sort((p1, p2) => p1.c - p2.c);
+        // v602: 指している所がモデルの内側にあって、どう引いてもモデルの上を通るときは、指している部品の上を少し通るのを許す
+        if (!out.length && keepEnd < 120) return staticCands(it, maxR, keepEnd < 60 ? 60 : 120);
         return out;
       };
       if (cov) { searchNearFn = searchNear; nearRectFn = nearRect; segHitsModelFn = segHitsModel; rectHitsModelFn = rectHitsModel; staticCandsFn = staticCands; }
@@ -20885,12 +20918,13 @@ pmi._lineFarPoint = null;
         if (badness() > b0) for (const [it, C] of snap) it.C = C;
       }
     }
+    const ringBackup = new Map(allItems.map((it) => [it, it.C]));
     // v601: 最後に、かぶりが一つも無いことを確かめる。かぶっているもの(記号どうしの重なり、指示線どうしの交差、
     // 指示線がほかの記号・寸法値・モデルの上を通る、記号が寸法値・モデル・リボン・部品表・画面の外にかかる)は、
     // かぶらない所を画面全体から探して移す。どこにも無ければ、その視点では出さない(かぶったままは出さない)。
     {
       const strictBudget = performance.now() + (isUserViewMoving(performance.now()) ? 40 : 2500);
-      const MAX_LEADER = PERIMETER_MAX_LEADER_PX;
+      const MAX_LEADER = MAXL;
       const FULL_RAD = []; for (let r = 10; r <= MAX_LEADER; r += 12) FULL_RAD.push(r);
       const live = () => allItems.filter((it) => it.C);
       const rOv = (r1, r2, m) => r1.x0 < r2.x1 + m && r1.x1 > r2.x0 - m && r1.y0 < r2.y1 + m && r1.y1 > r2.y0 - m;
@@ -20899,6 +20933,7 @@ pmi._lineFarPoint = null;
         if (!inBounds(it)) return [null];
         if (Math.hypot(a.x - b.x, a.y - b.y) > MAX_LEADER) return [null]; // v601: 指している所から遠すぎる
         if (dimRects.some((d) => rOv(R, d, 0) || segTouchesRect(a, b, d, 1))) return [null];
+        if (hitsDimLines(R, a, b)) return [null]; // v602
         if (rectHitsModelFn && rectHitsModelFn({ x0: R.x0 - 2, x1: R.x1 + 2, y0: R.y0 - 2, y1: R.y1 + 2 })) return [null];
         if (segHitsModelFn && segHitsModelFn(a, b, 22)) return [null];
         const out = [];
@@ -20959,7 +20994,7 @@ pmi._lineFarPoint = null;
         const snapA = new Map(allItems.map((it) => [it, it.C]));
         const cands = new Map();
         let timeOut = false;
-        for (const it of allItems) { if (performance.now() > tB) { timeOut = true; break; } cands.set(it, staticCandsFn(it, PERIMETER_MAX_LEADER_PX)); }
+        for (const it of allItems) { if (performance.now() > tB) { timeOut = true; break; } cands.set(it, staticCandsFn(it, MAXL)); }
         if (!timeOut) {
           const order = allItems.slice().sort((p1, p2) => cands.get(p1).length - cands.get(p2).length);
           const done = [];
@@ -21013,7 +21048,7 @@ pmi._lineFarPoint = null;
       let worst = null, wl = -1;
       for (let i = 0; i < L.length; i++) {
         const A = L[i], RA = rectOf(A), [a, b] = segOf(A);
-        let bad = !inBounds(A) || Math.hypot(a.x - b.x, a.y - b.y) > PERIMETER_MAX_LEADER_PX || dimRects.some((d) => (RA.x0 < d.x1 && RA.x1 > d.x0 && RA.y0 < d.y1 && RA.y1 > d.y0) || segTouchesRect(a, b, d, 1));
+        let bad = !inBounds(A) || Math.hypot(a.x - b.x, a.y - b.y) > MAXL || hitsDimLines(RA, a, b) || dimRects.some((d) => (RA.x0 < d.x1 && RA.x1 > d.x0 && RA.y0 < d.y1 && RA.y1 > d.y0) || segTouchesRect(a, b, d, 1));
         for (let j = 0; j < L.length && !bad; j++) {
           if (i === j) continue;
           const B = L[j], RB = rectOf(B), [c, d] = segOf(B);
@@ -21024,7 +21059,120 @@ pmi._lineFarPoint = null;
       if (!worst) break;
       worst.C = null;
     }
-    perimeterCache = { key: cacheKey, allC: new Map(allItems.filter((it) => it.C).map((it) => [it.p.id, it.C])) };
+    // v602: 一斉表示なので必ず全部出す。重ならずに置けないものがあれば、番号・記号を少し小さくして並べ直す
+    // (次のコマで)。いちばん小さくしても置けないものだけ、かぶりが一番少ない所に置く。
+    // v602: いちばん小さくしても置けないものは、指示線を長めに許して、じゃまをしている1つを別の所へ動かせば
+    // かぶらずに置けるなら、そうする
+    if (staticCandsFn && saZoom <= SA_ZOOM_MIN + 1e-3 && !isUserViewMoving(performance.now()) && allItems.some((it) => !it.C)) {
+      const tR = performance.now() + 2500;
+      const cm = new Map();
+      const cOf = (it) => { let c = cm.get(it); if (!c) { c = staticCandsFn(it, PERIMETER_MAX_LEADER_PX * 3); cm.set(it, c); } return c; };
+      const rOv3 = (r1, r2) => r1.x0 < r2.x1 + SP && r1.x1 > r2.x0 - SP && r1.y0 < r2.y1 + SP && r1.y1 > r2.y0 - SP;
+      const conf3 = (cd, o) => { const R = rectOf(o), so = segOf(o), [a, b] = cd.s; return rOv3(cd.R, R) || segTouchesRect(a, b, R, 3) || segTouchesRect(so[0], so[1], cd.R, 3) || segCrossesSeg(a, b, so[0], so[1]) || segCrossesSeg(so[0], so[1], a, b); };
+      for (let pass = 0; pass < 4 && performance.now() < tR; pass++) {
+        let gained = false;
+        for (const h of allItems) {
+          if (h.C || performance.now() > tR) continue;
+          const placedNow = allItems.filter((o) => o.C);
+          for (const cd of cOf(h)) {
+            if (performance.now() > tR) break;
+            const bl = [];
+            for (const o of placedNow) { if (conf3(cd, o)) { bl.push(o); if (bl.length > 2) break; } }
+            if (!bl.length) { h.C = cd.C; gained = true; break; }
+            if (bl.length > 2) continue;
+            // じゃまをしているもの(1〜2個)を、それぞれ別のかぶらない所へ動かせるか
+            const oldCs = bl.map((o) => o.C);
+            let ok = true;
+            const tmpH = { C: cd.C, g: h.g, O: h.O };
+            for (const b0 of bl) {
+              let moved = false;
+              for (const cb of cOf(b0)) {
+                if (conf3(cb, tmpH)) continue;
+                let good = true;
+                for (const o of placedNow) { if (o === b0) continue; if (conf3(cb, o)) { good = false; break; } }
+                if (good) { b0.C = cb.C; moved = true; break; }
+              }
+              if (!moved) { ok = false; break; }
+            }
+            if (ok) { h.C = cd.C; gained = true; break; }
+            bl.forEach((o, k) => { o.C = oldCs[k]; });
+          }
+        }
+        if (!gained) break;
+      }
+    }
+    const unplaced = allItems.filter((it) => !it.C);
+    const movingNow = isUserViewMoving(performance.now());
+    let shrinkNext = false;
+    for (const it of unplaced) {
+      const L = allItems.filter((o) => o.C && o !== it);
+      let best = null, bestCost = Infinity;
+      const cands = staticCandsFn ? staticCandsFn(it, PERIMETER_MAX_LEADER_PX * 3).slice(0, movingNow ? 60 : 2000) : [];
+      for (const cd of cands) {
+        const [a, b] = cd.s;
+        let c = cd.c * 0.01;
+        for (const o of L) {
+          const R = rectOf(o), so = segOf(o);
+          if (cd.R.x0 < R.x1 + 2 && cd.R.x1 > R.x0 - 2 && cd.R.y0 < R.y1 + 2 && cd.R.y1 > R.y0 - 2) c += 5000;
+          if (segTouchesRect(a, b, R, 2) || segTouchesRect(so[0], so[1], cd.R, 2)) c += 2000;
+          if (segCrossesSeg(a, b, so[0], so[1]) || segCrossesSeg(so[0], so[1], a, b)) c += 1000;
+          if (c >= bestCost) break;
+        }
+        if (c < bestCost) { bestCost = c; best = cd; }
+      }
+      it.C = best ? best.C : (ringBackup.get(it) || null);
+      if (it.C && !inBounds(it)) it.C = best ? best.C : null;
+      it.overlapFallback = !(best && bestCost < 1000);
+    }
+    // v602: 外周の輪に順番どおり並べただけの並べ方(交差しにくい)と比べて、かぶりの数が少ない方を使う
+    {
+      const totalConf = () => {
+        const L = allItems.filter((it) => it.C);
+        let n = (allItems.length - L.length) * 5; // 出せていないものは重く数える(全部出すのが先)
+        for (let i = 0; i < L.length; i++) {
+          const A = L[i], RA = rectOf(A), [a, b] = segOf(A);
+          if (!inBounds(A)) n += 3;
+          if (hitsDimLines(RA, a, b) || dimRects.some((d) => (RA.x0 < d.x1 && RA.x1 > d.x0 && RA.y0 < d.y1 && RA.y1 > d.y0) || segTouchesRect(a, b, d, 1))) n++;
+          if ((segHitsModelFn && segHitsModelFn(a, b, 22)) || (rectHitsModelFn && rectHitsModelFn(RA))) n++;
+          for (let j = i + 1; j < L.length; j++) {
+            const B = L[j], RB = rectOf(B), [c, d] = segOf(B);
+            if (RA.x0 < RB.x1 && RA.x1 > RB.x0 && RA.y0 < RB.y1 && RA.y1 > RB.y0) n += 2;
+            if (segTouchesRect(a, b, RB, 2) || segTouchesRect(c, d, RA, 2)) n++;
+            if (segCrossesSeg(a, b, c, d) || segCrossesSeg(c, d, a, b)) n++;
+          }
+        }
+        return n;
+      };
+      const cur = new Map(allItems.map((it) => [it, it.C]));
+      const fbCur = new Map(allItems.map((it) => [it, it.overlapFallback]));
+      const nCur = totalConf();
+      for (const it of allItems) it.C = ringBackup.get(it) || null;
+      const nRing = totalConf();
+      if (nRing < nCur) { for (const it of allItems) it.overlapFallback = true; perimeterRingWon = nRing; }
+      else { for (const [it, C] of cur) it.C = C; for (const [it, f] of fbCur) it.overlapFallback = f; perimeterRingWon = 0; }
+      if (nRing < nCur) { const L = allItems.filter((it) => it.C); for (const it of allItems) it.overlapFallback = false; void L; }
+      perimeterConfCount = Math.min(nRing, nCur);
+    }
+    let stageNext = false, backTo = null;
+    if (!movingNow && !saLocked) {
+      const fbN = perimeterConfCount;
+      saHistory.push({ z: saZoom, st: saLeaderStage, q: fbN });
+      if (fbN) {
+        if (!saLeaderStage) stageNext = true;
+        else if (saZoom > SA_ZOOM_MIN + 1e-3) shrinkNext = true;
+        else {
+          // これ以上は縮めない。いちばん置けた数が多かった段階(同じなら大きい記号・短い指示線)に戻して確定する
+          let best = null;
+          for (const h of saHistory) if (!best || h.q < best.q || (h.q === best.q && (h.z > best.z + 1e-6 || (Math.abs(h.z - best.z) < 1e-6 && h.st < best.st)))) best = h;
+          saLocked = true;
+          if (best && (Math.abs(best.z - saZoom) > 1e-6 || best.st !== saLeaderStage)) backTo = best;
+        }
+      } else saLocked = true;
+    }
+    perimeterCache = { key: cacheKey, allC: new Map(allItems.filter((it) => it.C).map((it) => [it.p.id, it.C])), fb: new Set(allItems.filter((it) => it.overlapFallback).map((it) => it.p.id)) };
+    if (backTo) { saLeaderStage = backTo.st; setSaZoom(backTo.z); saZoomRefScale = sceneScale; markRenderActive(600); }
+    if (stageNext) { saLeaderStage = 1; perimeterCache = null; saZoomRefScale = sceneScale; markRenderActive(600); }
+    if (shrinkNext) { setSaZoom(Math.max(SA_ZOOM_MIN, saZoom * 0.85)); saZoomRefScale = sceneScale; markRenderActive(600); }
     applyPerimeter();
   }
   function noteDimOverlapSweep(allScreenPmis, mvp) {
@@ -23752,7 +23900,7 @@ pmi._lineFarPoint = null;
       const declutterBaseKey = sceneRotation.x + ',' + sceneRotation.y + ',' + sceneRotation.z + ',' + sceneRotation.w +
         ',' + sceneScale + ',' + sceneTranslation.x + ',' + sceneTranslation.y +
         ',' + weldNotationScale() + ',' + noteBoxScale() + ',' + dimensionTagScale() + ',' + allScreenPmis.length +
-        ',' + selectedId +
+        ',' + selectedId + ',' + (showAllAtOnce ? saZoom + ':' + saLeaderStage : 1) + // v602: 一斉表示で番号・記号を縮めたら並べ直す
         // v375: 注記の「最大4件」の選定結果が、カメラが止まったままでも
         // 次のフレームで変わることがある(選定にタグの大きさ _tagW/_tagH を
         // 使っており、それが1フレーム遅れて確定するため)。表示する件数が
