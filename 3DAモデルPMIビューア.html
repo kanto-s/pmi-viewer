@@ -1171,7 +1171,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v622</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v626</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1319,6 +1319,9 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v626: 溶接記号がモデルを貫通して(モデルの上に重なって)表示されることがあった問題を直しました。これまで溶接記号は、枠の2割までならモデルに重なってもよいことにしていましたが、少しでも重なる置き場所は使わないようにしました。置き場所を選び直すときは、ほかの番号・記号の指示線と交差しない所を選びます(指示線どうしの交差は不可のまま)。モデルにも重ならず、ほかの指示線とも交差しない置き場所がどうしても無い向きでは、その溶接記号(と継ぎ目の強調)は出さず、向きを変えると出ます。</li>
+        <li>v625: 照合番号(バルーン)や指示線が寸法補助線にかぶって表示されることがあった問題を直しました。これまで調べていなかった寸法(寸法値を出さず線だけ描いている寸法)の線も調べ、指示線が寸法補助線・寸法線に沿って重なるときも、その角度だけ寸法の方を出さないようにしました。一斉表示のとき(寸法はすべて出します)は、指示線が寸法線・寸法補助線に沿わない置き場所を選び、それでも指示線が沿って重なる番号・記号や、番号の丸が寸法補助線にかかる番号・記号は、その角度では出さないようにしました。</li>
+        <li>v624: 動作を軽くしました。回転中に照合番号・溶接記号の置き場所を保っている間は、置き場所探しの計算を省くようにしました。また、重い端末で1コマに時間がかかると置き場所の計算を毎コマやり直してさらに重くなっていた問題を直しました。表示のされ方は変わりません。</li>
         <li>v622: 指示線どうしの交差・重なり、指示線が他の番号・記号の枠にかかる、番号・記号どうしの重なり、指示線・記号が寸法値にかかる表示を、すべての表示(一斉表示を含む)で出さないようにしました。かぶらない所へ移せないものは、その向きでは表示しません。指示線が交差してよいのは寸法線・寸法補助線だけです。</li>
         <li>v621: サブアセンブリを選んで「周りを薄く」表示にしたとき、周りの部品が白っぽい半透明になり、注記(白)と同じような色で見分けにくかった問題を修正しました。周りの部品は、STEPに入っている部品の色・背景色・PMIの色(注記・寸法・溶接記号)・強調の色のどれとも違う色(モデルごとに、部品の色合いから最も離れた見分けやすい色。例: 青・黄・緑の配管なら赤茶系)の半透明で表示し、縁が白く光らないようにしました。</li>
         <li>v620: 「PMIを一斉表示」で、溶接記号の矢の先を、溶接の継ぎ目(輪)のうち記号の側から見えている点にするようにしました(反対側を指して矢と指示線がモデルを貫通して見えていたため)。</li>
@@ -19124,12 +19127,17 @@ pmi._lineFarPoint = null;
   function pipeCenterOnScreen(cover, P) {
     const on = (x, y) => cover.atFine(x, y);
     if (!on(P.x, P.y)) return null;
-    const run = (ux, uy) => { let d = 0; while (d < PIPE_CENTER_MAX_HALF_PX && on(P.x + ux * (d + 1), P.y + uy * (d + 1))) d += 1; return d; };
+    // v624: これまでに見つけた一番狭い幅より広くなると分かった時点で、その向きを調べるのをやめる(結果は同じで、調べる点が減る)
+    const run = (ux, uy, lim) => { let d = 0; while (d < lim && on(P.x + ux * (d + 1), P.y + uy * (d + 1))) d += 1; return d; };
     let best = null;
     for (let k = 0; k < 18; k++) {
       const a = k * Math.PI / 18, ux = Math.cos(a), uy = Math.sin(a);
-      const r1 = run(ux, uy), r2 = run(-ux, -uy);
-      if (r1 >= PIPE_CENTER_MAX_HALF_PX || r2 >= PIPE_CENTER_MAX_HALF_PX) continue;
+      const L1 = best ? Math.min(PIPE_CENTER_MAX_HALF_PX, best.w) : PIPE_CENTER_MAX_HALF_PX;
+      const r1 = run(ux, uy, L1);
+      if (r1 >= L1) continue;
+      const L2 = best ? Math.min(PIPE_CENTER_MAX_HALF_PX, best.w - r1) : PIPE_CENTER_MAX_HALF_PX;
+      const r2 = run(-ux, -uy, L2);
+      if (r2 >= L2) continue;
       const w = r1 + r2;
       if (!best || w < best.w) best = { w, ux, uy, r1, r2 };
     }
@@ -19688,15 +19696,16 @@ pmi._lineFarPoint = null;
   function segTouchesRect(a, b, r, m) {
     // v596: 線分の外接矩形と枠が離れていれば必ず触れないので、先に除く(結果は同じで、PMIの一斉表示時に大幅に速くなる)
     if ((a.x < b.x ? b.x : a.x) <= r.x0 - m || (a.x < b.x ? a.x : b.x) >= r.x1 + m || (a.y < b.y ? b.y : a.y) <= r.y0 - m || (a.y < b.y ? a.y : b.y) >= r.y1 + m) return false;
-    const R = { x0: r.x0 - m, x1: r.x1 + m, y0: r.y0 - m, y1: r.y1 + m };
-    const inside = (q) => q.x > R.x0 && q.x < R.x1 && q.y > R.y0 && q.y < R.y1;
-    if (inside(a) || inside(b)) return true;
-    const c = [{ x: R.x0, y: R.y0 }, { x: R.x1, y: R.y0 }, { x: R.x1, y: R.y1 }, { x: R.x0, y: R.y1 }];
+    // v624: 途中でオブジェクトを作らない書き方に(計算式・結果は同じ。一斉表示で何万回も呼ばれるため)
+    const X0 = r.x0 - m, X1 = r.x1 + m, Y0 = r.y0 - m, Y1 = r.y1 + m;
+    if ((a.x > X0 && a.x < X1 && a.y > Y0 && a.y < Y1) || (b.x > X0 && b.x < X1 && b.y > Y0 && b.y < Y1)) return true;
+    const d1x = b.x - a.x, d1y = b.y - a.y;
     for (let i = 0; i < 4; i++) {
-      const p3 = c[i], p4 = c[(i + 1) % 4];
-      const d1x = b.x - a.x, d1y = b.y - a.y, d2x = p4.x - p3.x, d2y = p4.y - p3.y;
+      const p3x = (i === 0 || i === 3) ? X0 : X1, p3y = i < 2 ? Y0 : Y1;
+      const p4x = (i === 2 || i === 3) ? X0 : X1, p4y = (i === 0 || i === 3) ? Y0 : Y1;
+      const d2x = p4x - p3x, d2y = p4y - p3y;
       const den = d1x * d2y - d1y * d2x; if (Math.abs(den) < 1e-9) continue;
-      const t = ((p3.x - a.x) * d2y - (p3.y - a.y) * d2x) / den, u = ((p3.x - a.x) * d1y - (p3.y - a.y) * d1x) / den;
+      const t = ((p3x - a.x) * d2y - (p3y - a.y) * d2x) / den, u = ((p3x - a.x) * d1y - (p3y - a.y) * d1x) / den;
       if (t > 0 && t < 1 && u > 0 && u < 1) return true;
     }
     return false;
@@ -19711,7 +19720,7 @@ pmi._lineFarPoint = null;
     // v556: 回転中は、前のコマから続けて表示している照合番号・溶接記号の置き場所を変えない(v531)ので、
     // それらの置き場所探し(重い計算)は省く。回転中に新しく出てきたものだけ置き場所を決める。
     const movingNow = isUserViewMoving(performance.now());
-    const frozen = (p) => movingNow && p._smPolar && (p._smSeq === pmiSmoothLayoutSeq) && performance.now() - (p._smPolar.t || 0) <= 300;
+    const frozen = (p) => pmiHeldWhileMoving(p, performance.now(), movingNow); // v624
     const welds = allScreenPmis.filter((p) => !p.asRecorded && p._screen && !p._noModelLeader &&
       ((p.category === 'weld' && p._modelAttachmentPoint) || (p.category === 'note' && leaderModelPoint(p))) && !frozen(p));
     if (!welds.length) return;
@@ -20268,7 +20277,7 @@ pmi._lineFarPoint = null;
         for (const [a, b] of otherLeaders) if (segTouchesRect(a, b, ev.rect, 3)) n++;
         return n;
       };
-      const curOk = tangleOf(cur) === 0 && cur.tip.frac <= 0 /* v529: 溶接記号も少しでも横切れば置き直す */ && (isNote || (cur.tip.ang || 0) <= WELD_APPROACH_OK) && rectOnModel(cur.rect) < (isNote ? 0.001 : 0.2) &&
+      const curOk = tangleOf(cur) === 0 && cur.tip.frac <= 0 /* v529: 溶接記号も少しでも横切れば置き直す */ && (isNote || (cur.tip.ang || 0) <= WELD_APPROACH_OK) && rectOnModel(cur.rect) < 0.001 /* v626: 溶接記号も少しでもモデルに乗れば置き直す(以前は2割まで許していた) */ &&
         !rectHitsDim(cur.rect) && leaderDimCrosses(cur.K, cur.tip.screen) === 0 && leaderDimNear(cur.K, cur.tip.screen) < 0.05 &&
         Math.hypot(cur.K.x - cur.tip.screen.x, cur.K.y - cur.tip.screen.y) <= LEADER_HARD_PX; // v501: 離れすぎも直す
       // 前回移していなければ、問題が無い限り動かさない。前回移していたときは、元の置き場所に
@@ -20283,7 +20292,7 @@ pmi._lineFarPoint = null;
         if (tip.frac > 0) c += 2500 + tip.frac * 6000; // v529: 溶接記号の指示線もモデルを貫通させない(照合番号と同じ)
         for (const r of otherRects) if (ov(rect, r, 6)) { c += 3000; break; }
         // v499: 番号・記号がモデルの上に乗る置き場所は強く避ける(少しでも乗ると減点)
-        { const om = rectOnModel(rect); c += om * 6000 + (om > 0 ? 1500 : 0); } // v501: モデルに乗るのは一番避ける
+        { const om = rectOnModel(rect); c += om * 6000 + (om > 0 ? (isNote ? 1500 : 20000) : 0); } // v501: モデルに乗るのは一番避ける(v626: 溶接記号は指示線の交差よりも必ず不利に)
         // v503: 指示線どうしの交差・指示線とほかの番号の重なりは強く避ける
         for (const [a, b] of otherLeaders) if (segX(tip.screen, ev.K, a, b)) c += 3500;
         for (const r of otherRects) if (segTouchesRect(ev.K, tip.screen, r, 3)) c += 4000;
@@ -20525,6 +20534,43 @@ pmi._lineFarPoint = null;
     if (e) rect = { x0: e.l, x1: e.r, y0: e.t, y1: e.b };
     return { segs, rect };
   }
+  // v625: 指示線(K→O)が、寸法補助線・寸法線のどれかに沿って重なって見えるか(ほぼ平行(15°以内)で3px以内の部分が
+  // 10px以上続く)。指している点(O)の手前6pxは数えない(寸法補助線の付け根を指すのは重なりではない)。横切るだけなら数えない。
+  function leaderRunsAlongSegs(K, O, segs) {
+    const L = Math.hypot(O.x - K.x, O.y - K.y);
+    if (!(L > 12) || !segs || !segs.length) return false;
+    const ux = (O.x - K.x) / L, uy = (O.y - K.y) / L, use = L - 6;
+    const bx0 = Math.min(K.x, K.x + ux * use) - 3, bx1 = Math.max(K.x, K.x + ux * use) + 3, by0 = Math.min(K.y, K.y + uy * use) - 3, by1 = Math.max(K.y, K.y + uy * use) + 3;
+    // 指示線上の点 K+u*t について、寸法の線への距離・線上の位置は t の一次式なので、重なる区間を直接求める
+    const iv = [];
+    for (const sg of segs) {
+      const c = sg[0], d = sg[1];
+      if (!c || !d || Math.max(c.x, d.x) < bx0 || Math.min(c.x, d.x) > bx1 || Math.max(c.y, d.y) < by0 || Math.min(c.y, d.y) > by1) continue;
+      const ex = d.x - c.x, ey = d.y - c.y, ll = Math.hypot(ex, ey);
+      if (ll < 1) continue;
+      const cs = (ex * ux + ey * uy) / ll;
+      if (Math.abs(cs) < 0.966) continue;
+      const nx = -ey / ll, ny = ex / ll; // 寸法の線に垂直な向き
+      let lo = 0, hi = use;
+      // 距離 |d0 + d1 t| < 3
+      const d0 = (K.x - c.x) * nx + (K.y - c.y) * ny, d1 = ux * nx + uy * ny;
+      if (Math.abs(d1) < 1e-9) { if (Math.abs(d0) >= 3) continue; }
+      else { let a = (-3 - d0) / d1, b = (3 - d0) / d1; if (a > b) { const t = a; a = b; b = t; } lo = Math.max(lo, a); hi = Math.min(hi, b); }
+      // 寸法の線の範囲内 0 <= s0 + s1 t <= ll
+      const s0 = ((K.x - c.x) * ex + (K.y - c.y) * ey) / ll, s1 = cs;
+      { let a = (0 - s0) / s1, b = (ll - s0) / s1; if (a > b) { const t = a; a = b; b = t; } lo = Math.max(lo, a); hi = Math.min(hi, b); }
+      if (hi - lo >= 10) return true;
+      if (hi > lo) iv.push([lo, hi]);
+    }
+    if (iv.length < 2) return false;
+    iv.sort((p, q) => p[0] - q[0]);
+    let s = iv[0][0], e = iv[0][1];
+    for (let i = 1; i < iv.length; i++) {
+      if (iv[i][0] <= e + 2) e = Math.max(e, iv[i][1]); else { s = iv[i][0]; e = iv[i][1]; }
+      if (e - s >= 10) return true;
+    }
+    return false;
+  }
   // v544: 注記(番号の丸と指示線)が寸法の線・寸法値に重なるか
   function noteHitsDimShapes(nr, K, O, sh, m) {
     for (const [a, b] of sh.segs) if (segTouchesRect(a, b, nr, m)) return true;
@@ -20543,8 +20589,14 @@ pmi._lineFarPoint = null;
   // (指示線ごと)この向きでは出さない。①指示線どうしの交差・接触・重なり ②指示線が他の番号・記号の枠にかかる
   // ③番号・記号どうしの重なり ④指示線・記号が寸法値にかかる。指示線が交差してよいのは寸法線・寸法補助線だけ。
   // どれを隠すかは、かぶりの数が多いもの→前回も隠していたもの(出たり消えたりしないように)→指示線が長いもの、の順。
-  function finalLeaderGuard(entries, svgLines, allScreenPmis) {
+  function finalLeaderGuard(entries, svgLines, allScreenPmis, mvp) {
     if (!entries || entries.length < 1) return;
+    // v625: 一斉表示では寸法をすべて出すので、指示線が寸法線・寸法補助線に沿って重なる(かぶる)番号・記号は出さない
+    // (通常表示では、その角度だけ寸法の方を出さない: noteDimOverlapSweep)
+    let alongSegs = null;
+    if (showAllAtOnce && mvp) {
+      try { const cr = cvRect(); alongSegs = collectDimScreenSegs(allScreenPmis, mvp).map(([a, b]) => [{ x: a.x + cr.left, y: a.y + cr.top }, { x: b.x + cr.left, y: b.y + cr.top }]); } catch (e) { alongSegs = null; }
+    }
     const dimRects = [];
     for (const q of allScreenPmis) {
       if (q.category !== 'dimension' || q._dimWholeHidden || q._dimThinHidden || q._dimNoteHide) continue;
@@ -20566,7 +20618,8 @@ pmi._lineFarPoint = null;
       const r = t ? t.getBoundingClientRect() : null;
       if (r && r.width > 0 && r.height > 0) dimRects.push({ x0: r.left, x1: r.right, y0: r.top, y1: r.bottom });
     }
-    const selfBad = entries.map((E) => dimRects.some((d) => ovR(E.R, d, 0) || E.segs.some(([a, b]) => segTouchesRect(a, b, d, 1))));
+    const selfBad = entries.map((E) => dimRects.some((d) => ovR(E.R, d, 0) || E.segs.some(([a, b]) => segTouchesRect(a, b, d, 1))) ||
+      (!!alongSegs && (E.segs.some(([a, b]) => leaderRunsAlongSegs(a, b, alongSegs)) || alongSegs.some(([a, b]) => segTouchesRect(a, b, E.R, 0))))); // v625: 枠が寸法補助線にかかるのも不可
     const pairBad = (A, B) => {
       if (ovR(A.R, B.R, 1)) return true;
       for (const [a, b] of A.segs) if (segTouchesRect(a, b, B.R, 2)) return true;
@@ -20624,6 +20677,13 @@ pmi._lineFarPoint = null;
       return n;
     };
     const ov = (a, b) => Math.abs(a.C.x - b.C.x) * 2 < (a.g.w + b.g.w) && Math.abs(a.C.y - b.C.y) * 2 < (a.g.h + b.g.h);
+    let swCover = null; try { swCover = getScreenCover(mvp); } catch (e) { swCover = null; }
+    const weldOnModelAt = (it) => {
+      if (!swCover || it.p.category !== 'weld') return false;
+      const r = { x0: it.C.x - it.g.w / 2, x1: it.C.x + it.g.w / 2, y0: it.C.y - it.g.h / 2, y1: it.C.y + it.g.h / 2 };
+      if (weldRectOnCover(swCover, r) > 0) return true;
+      return swCover.segHitPxFine(it.C, it.O, weldTipSkipPx()) > WELD_FINAL_TOL_PX;
+    };
     let changed = false;
     for (let pass = 0; pass < 3; pass++) {
       let any = false;
@@ -20636,7 +20696,8 @@ pmi._lineFarPoint = null;
         const after = crossCount(items);
         const lenOk = Math.hypot(a.C.x - a.O.x, a.C.y - a.O.y) < 260 && Math.hypot(b.C.x - b.O.x, b.C.y - b.O.y) < 260;
         const ovBad = items.some((o) => o !== a && o !== b && (ov(o, a) || ov(o, b)));
-        if (after < before && lenOk && !ovBad) { any = true; changed = true; }
+        const modelBad = weldOnModelAt(a) || weldOnModelAt(b); // v626: 入れ替えで溶接記号がモデルに乗る(貫通して見える)ときは入れ替えない
+        if (after < before && lenOk && !ovBad && !modelBad) { any = true; changed = true; }
         else { a.C = ca; b.C = cb; }
       }
       if (!any) break;
@@ -21676,6 +21737,9 @@ pmi._lineFarPoint = null;
     }
     let dimSegs = [];
     try { dimSegs = collectDimScreenSegs(allScreenPmis, mvp).filter((sg) => sg && sg[0] && sg[1]); } catch (e) { dimSegs = []; }
+    // v624: 寸法線・寸法補助線を升目に分けて、枠の近くのものだけを調べる(結果は同じ)
+    const dimQP = makeSegGrid(dimSegs);
+    const dimTouch = (R, m) => { for (const [a, b] of dimQP(R.x0 - m - 1, R.y0 - m - 1, R.x1 + m + 1, R.y1 + m + 1)) if (segTouchesRect(a, b, R, m)) return true; return false; };
     const segOnModel = (a, b, keepEnd) => { // 指す点の手前 keepEnd px を除いて、モデルの上を通る長さ(px)
       const L = Math.hypot(b.x - a.x, b.y - a.y), n = Math.ceil(L / 3);
       let on = 0;
@@ -21935,7 +21999,7 @@ pmi._lineFarPoint = null;
       let c = 0;
       if (rectOnModel(R)) c += 1500;
       if (dimRects.some((d) => ov(R, d, 1))) c += 1200;
-      for (const [a, b] of dimSegs) if (segTouchesRect(a, b, R, 1)) { c += 1200; break; }
+      if (dimTouch(R, 1)) c += 1200; // v624
       for (const [a, b] of dimSegs) if (segCrossesSeg(S, it.O, a, b) || segCrossesSeg(a, b, S, it.O)) { c += 600; break; }
       if (dimRects.some((d) => segTouchesRect(S, it.O, d, 1))) c += 600;
       if (banned.some((b) => segTouchesRect(S, it.O, b, 1))) c += 5000;
@@ -21956,7 +22020,7 @@ pmi._lineFarPoint = null;
       let c = 0;
       if (rectOnModel(R)) c += 800;
       if (dimRects.some((d) => ov(R, d, 1))) c += 800;
-      for (const [a, b] of dimSegs) if (segTouchesRect(a, b, R, 1)) { c += 800; break; }
+      if (dimTouch(R, 1)) c += 800; // v624
       return c;
     };
     cost = new Array(n);
@@ -22145,10 +22209,13 @@ pmi._lineFarPoint = null;
         if (!inScreen(R) || banned.some((b) => ov(R, b, 0))) n2 += 50;
         if (rectOnModel({ x0: R.x0 - 2, x1: R.x1 + 2, y0: R.y0 - 2, y1: R.y1 + 2 })) n2 += 100; // 記号がモデルの上
         if (dimRects.some((d) => ov(R, d, 2))) n2 += 100; // 記号が寸法値の上
-        for (const [a, b] of dimSegs) if (segTouchesRect(a, b, R, 1)) { n2 += 10; break; }
+        if (dimTouch(R, 1)) n2 += 10; // v624
         if (segOnModel(S, it.O, it.keepEnd) > 0) n2 += 6; // 指示線がモデルを貫通
         if (dimRects.some((d) => segTouchesRect(S, it.O, d, 2))) n2 += 30; // 指示線が寸法値の上
         // v622: 指示線が寸法線・寸法補助線を横切るのはよい(数えない)
+        // v625: ただし寸法線・寸法補助線に沿って重なる(かぶる)のは不可
+        { const xa = Math.min(S.x, it.O.x), xb = Math.max(S.x, it.O.x), ya = Math.min(S.y, it.O.y), yb = Math.max(S.y, it.O.y);
+          if (leaderRunsAlongSegs(S, it.O, dimQP(xa - 4, ya - 4, xb + 4, yb + 4))) n2 += 30; }
         if (banned.some((b) => segTouchesRect(S, it.O, b, 1))) n2 += 30;
         if (it.knee) { const ddx = Math.abs(S.x - it.O.x), ddy = Math.abs(S.y - it.O.y); if (ddy < ddx * 0.4) n2 += 3; } // v618: 溶接記号は斜めから
         return n2;
@@ -22301,7 +22368,7 @@ pmi._lineFarPoint = null;
         if (!inScreen(R) || banned.some((b) => ov(R, b, 0) || segTouchesRect(S, it.O, b, 1))) return false;
         if (rectOnModel({ x0: R.x0 - 2, x1: R.x1 + 2, y0: R.y0 - 2, y1: R.y1 + 2 })) return false;
         if (selfHard(it, C, S)) return false;
-        for (const [a, b] of dimSegs) if (segTouchesRect(a, b, R, 1)) return false; // 記号は寸法線の上に置かない(指示線は横切ってよい)
+        if (dimTouch(R, 1)) return false; // v624 // 記号は寸法線の上に置かない(指示線は横切ってよい)
         for (const o of L) if (o !== it && pairHard(it, C, S, o)) return false;
         return true;
       };
@@ -22347,6 +22414,17 @@ pmi._lineFarPoint = null;
     const cr = cvRect();
     const vk = noteViewKey();
     const dims = allScreenPmis.filter((q) => q.category === 'dimension' && !q._dimWholeHidden && !q._dimThinHidden && !q._dimNoteHide && q.id !== selectedId);
+    // v625: 「寸法補助線に指示(線)がかぶっている」との指摘。配置の対象一覧に入っていなくても線が描かれている寸法
+    // (collectDimScreenSegs と同じ条件)は調べていなかったため、それらも線だけで調べる
+    const dimsLineOnly = new Set();
+    if (typeof pmiList !== 'undefined' && pmiList) {
+      const inList = new Set(dims);
+      for (const q of pmiList) {
+        if (!q || q.category !== 'dimension' || inList.has(q) || allScreenPmis.includes(q) || q._counterboreHidden || q.id === selectedId) continue;
+        if (!isCategoryVisible(q) || q._markerOccluded || q._farOccluded || q._dimWholeHidden || q._diamHideRealGraphic || q._dimThinHidden || q._dimNoteHide) continue;
+        dims.push(q); dimsLineOnly.add(q);
+      }
+    }
     if (!dims.length) return;
     const shapes = new Map();
     for (const n of allScreenPmis) {
@@ -22365,15 +22443,18 @@ pmi._lineFarPoint = null;
       if (O) { const dx = O.x - C.x, dy = O.y - C.y, d = Math.hypot(dx, dy) || 1, rr = Math.max(g.w, g.h) / 2; K = { x: C.x + dx / d * Math.min(rr, d), y: C.y + dy / d * Math.min(rr, d) }; }
       for (const q of dims) {
         if (q._dimNoteHide) continue;
+        const lineOnly = dimsLineOnly.has(q);
         const qel = markerEls.get(q.id);
-        if (!qel || qel.style.display === 'none') continue;
+        if (!lineOnly && (!qel || qel.style.display === 'none')) continue;
         let sh = shapes.get(q);
         if (!sh) {
           sh = dimNoteShapes(q, mvp);
-          if (q._dimFinalRect) { const r = dimRectForNoteLayout(q, q._dimFinalRect); if (r) sh.rect = { x0: r.left - cr.left, x1: r.right - cr.left, y0: r.top - cr.top, y1: r.bottom - cr.top }; }
+          if (lineOnly) sh.rect = null; // 寸法値を出していない寸法は線だけ
+          else if (q._dimFinalRect) { const r = dimRectForNoteLayout(q, q._dimFinalRect); if (r) sh.rect = { x0: r.left - cr.left, x1: r.right - cr.left, y0: r.top - cr.top, y1: r.bottom - cr.top }; }
           shapes.set(q, sh);
         }
-        if (noteHitsDimShapes(nr, K, O, sh, NOTE_DIM_CLEAR_PX)) {
+        // v625: 指示線が寸法補助線・寸法線に沿って重なる(かぶる)ときも、その角度では寸法を出さない(B案)。横切るのはよい
+        if (noteHitsDimShapes(nr, K, O, sh, NOTE_DIM_CLEAR_PX) || (K && O && leaderRunsAlongSegs(K, O, sh.segs))) {
           q._dimNoteHide = { note: n.id, vk };
           markRenderActive(300);
         }
@@ -22634,6 +22715,17 @@ pmi._lineFarPoint = null;
       if (noteHoverFreeze) noteHoverFreeze.delete(w.id);
     }
   }
+  // v626: 溶接記号の枠(画面上の四角)にモデルの絵がかかっている割合(4px間隔の升目、枠の縁1pxは数えない)。
+  // 枠の一部でもモデルに重なれば0より大きい(記号がモデルを貫通して見える)。
+  function weldRectOnCover(cover, r) {
+    if (!cover || !r) return 0;
+    const x0 = r.x0 + 1, x1 = r.x1 - 1, y0 = r.y0 + 1, y1 = r.y1 - 1;
+    if (!(x1 > x0 && y1 > y0)) return 0;
+    const nx = Math.max(3, Math.ceil((x1 - x0) / 4)), ny = Math.max(2, Math.ceil((y1 - y0) / 4));
+    let h = 0;
+    for (let i = 0; i <= nx; i++) for (let j = 0; j <= ny; j++) if (cover.atFine(x0 + (x1 - x0) * i / nx, y0 + (y1 - y0) * j / ny)) h++;
+    return h / ((nx + 1) * (ny + 1));
+  }
   function weldFinalLeaderCheck(allScreenPmis, mvp) {
     const cover = getScreenCover(mvp);
     if (!cover) return;
@@ -22660,6 +22752,8 @@ pmi._lineFarPoint = null;
       for (let i = 0; i < 7; i++) for (let j = 0; j < 4; j++) if (cover.atFine(r.x0 + (r.x1 - r.x0) * (i + 0.5) / 7, r.y0 + (r.y1 - r.y0) * (j + 0.5) / 4)) h++;
       return h / 28;
     };
+    // v626: 記号の枠の中にモデルが少しでもあるか(4px間隔の細かい升目。枠の縁1pxは数えない)
+    const rectOnModelStrict = (r) => weldRectOnCover(cover, r);
     const geo = new Map();
     const geoOf = (p) => { let g = geo.get(p); if (!g) { g = measureTagCenterOffset(p); geo.set(p, g); } return g; };
     // v534: 時間切れで後回しになった記号が次のコマで先に調べられるよう、調べ始める順番を毎回ずらす
@@ -22716,11 +22810,13 @@ pmi._lineFarPoint = null;
         }
         for (const [a, b] of otherLeaders) if (segTouchesRect(a, b, ev.rect, 2)) n++;
         for (const [a, b] of dimSegs) if (segTouchesRect(a, b, ev.rect, 2)) n++;
+        // v626: ほかの番号・記号の指示線と交差する(接する・重なる)置き場所も避ける(指示線どうしの交差は不可)
+        for (const [a, b] of otherLeaders) if (leaderSegsConflict(ev.K, ev.tip.screen, b, a)) n++;
         return n;
       };
       const curText = textHits(cur);
       const curGhost = (cur && coverAll) ? ghostOver(cur) : 0;
-      const curModelOk = !!cur && cur.frac === 0 && rectOnModel(cur.rect) === 0;
+      const curModelOk = !!cur && cur.frac === 0 && rectOnModelStrict(cur.rect) === 0; // v626: 細かい升目で
       const ghostOnly = curModelOk && curText === 0 && curGhost > 0;
       if (!cur || (curModelOk && curText === 0 && !ghostOnly)) { if (cur) w._finalFixKey = null; continue; }
       if (performance.now() - t0 > WELD_FINAL_BUDGET_MS) {
@@ -22744,8 +22840,8 @@ pmi._lineFarPoint = null;
         let c = Math.hypot(P.x - P0.x, P.y - P0.y) * 0.5 + leaderLenPenalty(len) + (bonus || 0);
         const ang = evGiven ? (ev.tip.ang || 0) : weldApproachBadAt(w, ev.tip, ev.K);
         c += ang * 2000 + (ang > WELD_APPROACH_OK ? 1500 : 0);
-        const om = rectOnModel(ev.rect);
-        c += om * 6000 + (om > 0 ? 20000 : 0); // v534: 記号がモデルに乗るのも、指示線が横切るのと同じく避ける
+        const om = rectOnModelStrict(ev.rect);
+        if (om > 0) return; // v626: 記号がモデルに乗る(モデルを貫通して見える)置き場所は、指示線が横切るのと同じく使わない
         c += textHits(ev) * 50000; // v536: 文字との重なりは、モデルとの重なりと同じく必ず避ける(1つでもあれば、無い候補より必ず不利)
         if (coverAll) c += ghostOver(ev) * 40; // v535: 薄い部品との重なりは少ないほどよい(避けきれなくてもよい)
         if (w._finalFixKey === key) c -= 600; // 前のコマと同じ候補を有利に(回転中に飛び回らないように)
@@ -23661,6 +23757,15 @@ pmi._lineFarPoint = null;
   // 目標へ少しずつ近づける(v530からは臨界減衰ばね springStep、約0.3秒でほぼ到着)。
   const PMI_SMOOTH_TAU_MS = 60;
   let pmiSmoothFrame = 0, pmiSmoothDt = 16, pmiSmoothLastT = 0, pmiSmoothMoving = false;
+  // v624: 「動作が重い」との指摘を受けた高速化。回転中に置き場所を保つ(v531)かどうかを「前のコマから300ms以内か」で
+  // 決めていたため、1コマに300msより長くかかる重い端末では、毎コマ置き場所を一から計算し直し(重い計算)、
+  // さらに重くなる悪循環になっていた。最近のコマの間隔に合わせて待つ時間をのばす(最大2秒)。
+  let pmiFrameGapMs = 16;
+  function pmiHoldFreshMs() { return Math.max(300, Math.min(2000, pmiFrameGapMs * 3)); }
+  // v624: 回転中に、前のコマから続けて表示していて置き場所を保っている照合番号・溶接記号か
+  function pmiHeldWhileMoving(p, now, movingNow) {
+    return !!(movingNow && p._smPolar && p._smSeq === pmiSmoothLayoutSeq && now - (p._smPolar.t || 0) <= pmiHoldFreshMs());
+  }
   let pmiSmoothLayoutSeq = 0;
   function smoothRel(pmi, key, tx, ty, contiguous) {
     const now = performance.now();
@@ -23724,7 +23829,8 @@ pmi._lineFarPoint = null;
     return { x, y };
   }
   function render() {
-    { const t = performance.now(); pmiSmoothDt = Math.min(50, Math.max(1, t - (pmiSmoothLastT || t - 16))); pmiSmoothLastT = t; pmiSmoothFrame++; pmiSmoothMoving = false; }
+    { const t = performance.now(); const gap = t - (pmiSmoothLastT || t - 16); pmiSmoothDt = Math.min(50, Math.max(1, gap)); pmiSmoothLastT = t; pmiSmoothFrame++; pmiSmoothMoving = false;
+      if (gap > 0 && gap < 1500) pmiFrameGapMs = pmiFrameGapMs * 0.7 + gap * 0.3; } // v624
     // v511: 描画中だけcanvasの大きさを使い回す(cvSize()参照)
     _cvCache = null; _cvCacheOn = true;
     try { renderFrame(); } finally { _cvCacheOn = false; _cvCache = null; }
@@ -25473,7 +25579,26 @@ pmi._lineFarPoint = null;
       //      「指示線が他のタグを貫通しない」「指示線が短い」が最も良い割り当てを
       //      選ぶ。
       // 件数が多い場合は方向が足りないため、従来の配置のままにする。
-      try { applyRadialPmiLayout(allScreenPmis, mvp); } catch (err) { console.warn('放射状配置に失敗しました', err); }
+      // v624: 回転中に、照合番号・溶接記号がすべて置き場所を保っている(結果を使わない)ときは、放射状配置の計算(重い)を省き、
+      // 保っている位置(この後で置く位置と同じ)にしてから、続く確認を行う
+      let radialSkip = false;
+      { const nowH = performance.now(), mvH = isUserViewMoving(nowH);
+        const tg = mvH ? allScreenPmis.filter((p) => (p.category === 'note' || p.category === 'weld') && !p.asRecorded && p._anchorScreen) : [];
+        if (tg.length && tg.every((p) => pmiHeldWhileMoving(p, nowH, mvH))) {
+          radialSkip = true;
+          for (const p of tg) {
+            const st = p._smPolar, tipL = leaderModelPoint(p), cx = (p._tagW || 40) / 2;
+            let x, y;
+            if (st.tip !== tipL && st.ax != null) { x = st.ax; y = st.ay; }
+            else {
+              let O = null; if (tipL) { try { O = project(mvp, tipL); } catch (e) { O = null; } }
+              if (!O) O = p._anchorScreen;
+              x = O.x + Math.cos(st.a) * st.r; y = O.y + Math.sin(st.a) * st.r;
+            }
+            if (Number.isFinite(x) && Number.isFinite(y)) { p._screen.x = x - cx; p._screen.y = y; }
+          }
+        } }
+      if (!radialSkip) { try { applyRadialPmiLayout(allScreenPmis, mvp); } catch (err) { console.warn('放射状配置に失敗しました', err); } }
       // v378: 溶接記号・注記のタグが寸法値と重なっていたら、重ならない位置へ移す
       // (件数によらず、放射状配置の後に必ず行う)。
       try { resolveTagOverlapsWithDimensionText(allScreenPmis, mvp); } catch (err) { console.warn('寸法値との重なり回避に失敗しました', err); }
@@ -25672,7 +25797,7 @@ pmi._lineFarPoint = null;
           if (st && st.tip !== tipL && st.ax != null) { // 溶接記号の矢の先が変わったときは、記号の位置を保ったまま引き継ぐ
             const dx = st.ax - O.x, dy = st.ay - O.y; st.r = Math.hypot(dx, dy); st.a = Math.atan2(dy, dx); st.tip = tipL;
           }
-          if (st && st.tip === tipL && performance.now() - st.t <= 300) {
+          if (st && st.tip === tipL && performance.now() - st.t <= pmiHoldFreshMs()) { // v624
             // 前のコマの見た目の位置(指示線の先から見た角度・距離)をそのまま使う
             if (st.f !== pmiSmoothFrame) { st.va = 0; st.vr = 0; st.t = performance.now(); st.f = pmiSmoothFrame; }
             const x = O.x + Math.cos(st.a) * st.r, y = O.y + Math.sin(st.a) * st.r;
@@ -25983,6 +26108,11 @@ pmi._lineFarPoint = null;
                 // v584: 指している部品の上を長く通ってから先端に届く指示線も、モデルの絵に紛れてどこを指しているか
                 // 分からないので出さない(指示線の先はふつうモデルの外形で止まるので、上を通るのはわずかなはず)
                 if (!crosses && onLen > 10) crosses = true;
+                // v626: 溶接記号そのもの(旗・基線・記号・寸法の文字の枠)がモデルの上に重なる(モデルを貫通して見える)ときも出さない
+                if (!crosses && pmi.category === 'weld' && tagEl) {
+                  const tr = tagEl.getBoundingClientRect();
+                  if (tr.width > 0 && tr.height > 0 && weldRectOnCover(cov, { x0: tr.left - crx.left, x1: tr.right - crx.left, y0: tr.top - crx.top, y1: tr.bottom - crx.top }) > 0) crosses = true;
+                }
               }
             } catch (e) { crosses = false; }
             if (crosses && pmi.id !== selectedId) {
@@ -26026,7 +26156,7 @@ pmi._lineFarPoint = null;
             }
           }
         }
-        try { finalLeaderGuard(guardEntries, svgLines, allScreenPmis); } catch (e) { console.warn('指示線のかぶりの最終確認に失敗しました', e); }
+        try { finalLeaderGuard(guardEntries, svgLines, allScreenPmis, mvp); } catch (e) { console.warn('指示線のかぶりの最終確認に失敗しました', e); }
         declutterSvg.innerHTML = svgLines.join('');
       }
       lastDeclutterStateKey = declutterStateKey;
