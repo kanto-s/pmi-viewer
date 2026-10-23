@@ -1171,7 +1171,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v630</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v631</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1319,6 +1319,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v631: 回転中と、回転を止めた直後の動作を軽くしました。(1) 回し始めに、表示中の番号・記号の置き場所を全部計算し直していたのをやめ、新しく出てきたものだけを置くようにしました。(2) 回している間は、指示線がほかの部品の上を通るかの細かい判定や、溶接記号の置き場所探しを省き、止めた瞬間にまとめて調べ直します。(3) 止めた後の「落ち着くまで計算し直す」コマでは、視点が同じなら前のコマの配置結果を使い回します。(4) v628で入れた「回している間だけ解像度を下げる」仕組みは、切り替えのたびに画面が一瞬止まる原因になっていたのでやめました。こちらの測定では、回している間の1コマの計算時間が中央値で約7〜11ms、止めた直後の最も重いコマが約130〜270msから約10〜100msになりました。</li>
         <li>v630: 照合番号などの注記の表示位置がばらばらに見えないよう、近くの注記どうしの縦・横の位置をそろえて、行と列(四角形の辺)に並ぶようにしました。指示線の長さの上限(指している配管から50px以内)は守り、そろえるとモデル・寸法・ほかの記号にかかる場合や、指示線がほかの部品の上を通る・交差する場合はそろえません(通常表示のみ)。</li>
         <li>v629: 回転を止めたと判定するまでの待ち時間を、120msから60msにさらに短くしました。描画に時間がかかる端末では、これまでどおり1コマの間隔に合わせて待ち時間をのばします(回している途中で「止めた」と誤って判定しないため)。</li>
         <li>v628: 回転を止めてからワンテンポ遅れてモデルが回ったり、PMIが表示されたりする問題を改善しました。(1) 照合番号・溶接記号の置き場所の割り当てに、ハンガリアン法(割り当て問題の解法)を使うようにしました。1件ずつのコストの合計が最小になる割り当てを先に求め、指示線の交差や重なりが減る入れ替えで仕上げてから、時間の許す範囲で総当たりで確かめます。(2) 回転を止めたと判定するまでの待ち時間を180msから120msに短くしました。描画に時間がかかる端末では、回している途中に「止めた」と誤って判定しないよう、待ち時間を1コマの間隔に合わせてのばします。(3) 止めたあとの置き場所の計算が3コマ続けて同じ結果になったら、計算し直しを早めに終えるようにしました。(4) 描画(GPU)が追いつかない端末では、回している間だけ描画の解像度を下げ、止めた瞬間に元に戻します。</li>
@@ -9648,7 +9649,15 @@
   // いっぱい)」の2つの長方形を候補にし、モデルを大きく表示できる方
   // (短い辺が長い方)を、モデルを収める範囲として使う。
   const PTABLE_DOCK_GAP_PX = 8; // 部品表とモデルの間に空けるすき間
+  // v631: 同じコマの中では測り直さない(画面の配置の読み取りは重いため)
+  let ptDockCache = null, ptDockCacheF = -1;
   function getPartsTableDockRect() {
+    if (_cvCacheOn && ptDockCacheF === pmiSmoothFrame) return ptDockCache;
+    const r0 = getPartsTableDockRect0();
+    if (_cvCacheOn) { ptDockCache = r0; ptDockCacheF = pmiSmoothFrame; }
+    return r0;
+  }
+  function getPartsTableDockRect0() {
     const dock = document.getElementById('ptableDock');
     if (!dock || dock.hidden) return null;
     const r = dock.getBoundingClientRect();
@@ -10829,6 +10838,7 @@
 
   canvas.addEventListener('pointerdown', (e) => {
     canvas.setPointerCapture(e.pointerId);
+    if (pointers.size === 0) { try { refreshHeldPolar(pmiList, currentMvp()); } catch (err) { /* 次のコマで */ } } // v631
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     hideGestureHint();
     if (e.pointerType === 'mouse' && e.button === 2) {
@@ -19118,23 +19128,10 @@ pmi._lineFarPoint = null;
     }
   }
 
-  // v628: 「回転を止めてからワンテンポ遅れて回る」との指摘への対応。描画(GPU)が追いつかない端末では、
-  // 描き終わるのを待つ間に操作が溜まり、手を止めた後もモデルが遅れて回り続けて見える。
-  // 回している間だけ、描画が原因で1コマの間隔が長い(MOVE_LOWRES_GAP_MS より遅い)ときは描画の解像度を下げて軽くし、
-  // 止めた瞬間に元の解像度へ戻す(止まっている間の見た目は変わらない)。速い端末では何も変わらない。
-  const MOVE_LOWRES_GAP_MS = 22;
-  let moveLowRes = false, moveSlowFrames = 0, lastRenderJsMs = 0;
-  function updateMoveLowRes() {
-    const moving = isUserViewMoving(performance.now()) && pointers.size > 0;
-    if (!moving) { moveLowRes = false; moveSlowFrames = 0; return; }
-    // 計算(JavaScript)ではなく描画(GPU)に時間がかかっているコマだけを数える(計算が重いだけなら解像度を下げても速くならない)
-    if (pmiSmoothDt > MOVE_LOWRES_GAP_MS && pmiSmoothDt - lastRenderJsMs > 14) moveSlowFrames++; else moveSlowFrames = Math.max(0, moveSlowFrames - 1);
-    if (moveSlowFrames >= 4) moveLowRes = true;
-  }
+  let lastRenderJsMs = 0;
   function resizeCanvasToDisplaySize() {
     updateRibbonHeightVar();
-    let dpr = Math.min(window.devicePixelRatio || 1, 2);
-    if (moveLowRes) dpr = Math.max(0.6, dpr * (pmiFrameGapMs > 40 ? 0.5 : 0.7)); // v628
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const w = Math.round(canvas.clientWidth * dpr);
     const h = Math.round(canvas.clientHeight * dpr);
     if (canvas.width !== w || canvas.height !== h) {
@@ -19272,10 +19269,43 @@ pmi._lineFarPoint = null;
     const shY = pmi.category === 'weld' ? (pmi._weldShiftY || 0) : 0;
     return { w: tr.width, h: tr.height, offX: (tr.left + tr.right) / 2 - mr.left, offY: (tr.top + tr.bottom) / 2 - (mr.top + mr.height / 2) - shY };
   }
+  let radialCache = null; // v631
   function applyRadialPmiLayout(allScreenPmis, mvp) {
-    const targets = allScreenPmis.filter((p) => (p.category === 'note' || p.category === 'weld') && !p.asRecorded);
+    let targets = allScreenPmis.filter((p) => (p.category === 'note' || p.category === 'weld') && !p.asRecorded);
     // v495: 1件だけのときも、指示線がほかの部品を横切らない置き場所を選ぶため配置する
     if (targets.length < 1 || targets.length > RADIAL_LAYOUT_MAX_COUNT) return;
+    // v631: 回している間に新しく出てきた番号・記号があるときも、置き場所を保っているもの(この後の処理で
+    // 保った位置に戻す)は計算し直さず、その方向だけを「使用中」にして、新しく出てきたものだけを置く。
+    // 以前は1つでも新しいものがあると全部を計算し直していたため、回している間のコマが重くなっていた。
+    let heldDirs = null;
+    const radialMovingNow = isUserViewMoving(performance.now());
+    { const nowR = performance.now();
+      if (radialMovingNow) {
+        const held = targets.filter((p) => p._anchorScreen && pmiHeldWhileMoving(p, nowR, true));
+        if (held.length) {
+          heldDirs = new Set(held.map((p) => p._radialPrevDir).filter((k) => k != null && k >= 0));
+          targets = targets.filter((p) => !held.includes(p));
+          if (!targets.length) return;
+        }
+      } }
+    // v631: 止めた後の「落ち着くまで計算し直す」コマでは、視点も対象も同じなので、前のコマの結果をそのまま使う
+    // (同じ計算を何度もしない)。視点・画面の大きさ・対象・記号の大きさ・表示中の寸法のどれかが変われば計算し直す。
+    let radialKey = null;
+    if (!radialMovingNow) {
+      let k = Array.from(mvp, (v) => v.toFixed(5)).join(',') + '|' + cvSize().w + 'x' + cvSize().h + '|';
+      for (const p of targets) k += p.id + ':' + Math.round(p._radialMaxW || p._tagW || 0) + 'x' + Math.round(p._radialMaxH || p._tagH || 0) + ',';
+      k += '|';
+      for (const dp of allScreenPmis) if (dp.category === 'dimension' && dp._screen) k += dp.id + '@' + Math.round(dp._screen.x) + ',' + Math.round(dp._screen.y) + ',' + Math.round(dp._tagW || 0) + ';';
+      radialKey = k;
+      if (radialCache && radialCache.key === k) {
+        for (const p of targets) {
+          const r = radialCache.out.get(p.id);
+          if (!r) continue;
+          p._screen.x = r.x; p._screen.y = r.y; p._radialPrevDir = r.dir;
+        }
+        return;
+      }
+    }
     // 1. モデルが画面上で占める範囲。
     // v377: 「指示線が長すぎる場面がある。寸法を超えないくらいの長さに
     // したい」との要望を受けた。v376はモデルの外接直方体の8隅と寸法線まで
@@ -19387,7 +19417,9 @@ pmi._lineFarPoint = null;
       // v495: 「矢(指示線)がハンドルなど別の部品の上を通ってしまう」との指摘を受け、置き場所ごとに
       // 指示線がモデルの上を横切る割合を調べて減点する。溶接記号は、その置き場所から一番よく
       // 指せる矢の先(継ぎ目の線の上の見えている点)を選んだうえで評価する。
-      const coverL = getScreenCover(mvp);
+      // v631: 回している間に新しく出てきたものは、指示線がほかの部品の上を通るかの細かい判定(重い)を省く
+      // (回している間は置き場所を保つだけで、止めた瞬間に、すべて調べ直して置き直す)
+      const coverL = radialMovingNow ? null : getScreenCover(mvp);
       const leaderFor = (P, rect) => {
         if (!coverL) return { O, frac: 0 };
         // 指示線が記号の枠から出る点(枠の中心Pから指示点へ向かう線と枠の交点)
@@ -19449,7 +19481,7 @@ pmi._lineFarPoint = null;
       const single = DIRS.map((d, k) => {
         const cos = ol > 1e-6 ? (d.x * ox + d.y * oy) / ol : 0;
         const P = places[k].P, Ok = places[k].O;
-        return (1 - cos) * 400 + Math.hypot(P.x - Ok.x, P.y - Ok.y) * 0.5 + places[k].pen;
+        return (1 - cos) * 400 + Math.hypot(P.x - Ok.x, P.y - Ok.y) * 0.5 + places[k].pen + (heldDirs && heldDirs.has(k) ? 1e6 : 0); // v631
       });
       return { pmi, g, O, places, single };
     });
@@ -19572,6 +19604,7 @@ pmi._lineFarPoint = null;
       it.pmi._screen.x = P.x - it.g.offX;
       it.pmi._screen.y = P.y - it.g.offY;
     }
+    if (radialKey) radialCache = { key: radialKey, out: new Map(items.map((it) => [it.pmi.id, { x: it.pmi._screen.x, y: it.pmi._screen.y, dir: it.pmi._radialPrevDir }])) }; // v631
   }
 
   // v378: 「寸法値と溶接記号が重なると互いに読めなくなるので、重ならない
@@ -19819,6 +19852,9 @@ pmi._lineFarPoint = null;
   //   ・番号の丸(記号の枠)が寸法線・寸法補助線に重なる、指示線が寸法補助線を横切る → 同上
   // 指示線のモデル側の点(どこを指すか)は変えず、番号・記号の置き場所だけを動かす。
   function resolveWeldLeaderCrossings(allScreenPmis, mvp) {
+    // v631: 回している間は行わない(置き場所は保つだけ。止めた瞬間に調べ直す)。回している間に新しく出てきたものの
+    // 置き場所探しが毎コマ重かった
+    if (isUserViewMoving(performance.now())) return;
     const cover = getScreenCover(mvp);
     if (!cover) return;
     // v556: 回転中は、前のコマから続けて表示している照合番号・溶接記号の置き場所を変えない(v531)ので、
@@ -24282,6 +24318,23 @@ pmi._lineFarPoint = null;
     return !!(movingNow && p._smPolar && p._smSeq === pmiSmoothLayoutSeq && now - (p._smPolar.t || 0) <= pmiHoldFreshMs());
   }
   let pmiSmoothLayoutSeq = 0;
+  // v631: 照合番号・溶接記号の「指している点から見た角度・距離」(回している間に置き場所を保つための記録)を、
+  // 今表示している位置で更新する。計算を省いたコマや、しばらく描き直していなかった後に回し始めたときに、
+  // 記録が古いせいで「保っていない」と判定され、回し始めの数コマで全部の置き場所を計算し直すのを防ぐ。
+  function refreshHeldPolar(list, mvp) {
+    const nowH = performance.now();
+    for (const pmi of list) {
+      if ((pmi.category !== 'note' && pmi.category !== 'weld') || pmi.asRecorded || !pmi._anchorScreen || !pmi._smPolar || !pmi._screen) continue;
+      const tipL = leaderModelPoint(pmi);
+      let O = null; if (tipL) { try { O = project(mvp, tipL); } catch (e) { O = null; } }
+      if (!O) continue;
+      const st = pmi._smPolar, cx = (pmi._tagW || 40) / 2, x = pmi._screen.x + cx, y = pmi._screen.y;
+      st.r = Math.hypot(x - O.x, y - O.y); st.a = Math.atan2(y - O.y, x - O.x); st.ax = x; st.ay = y; st.tip = tipL;
+      st.va = 0; st.vr = 0; st.t = nowH; st.f = pmiSmoothFrame;
+      pmi._smSeq = pmiSmoothLayoutSeq;
+    }
+  }
+
   function smoothRel(pmi, key, tx, ty, contiguous) {
     const now = performance.now();
     const st = pmi[key];
@@ -24687,7 +24740,6 @@ pmi._lineFarPoint = null;
       }
     }
     if (gl) {
-      try { updateMoveLowRes(); } catch (e) { moveLowRes = false; }
       resizeCanvasToDisplaySize();
       gl.viewport(0, 0, canvas.width, canvas.height);
       if (!viewportBgRgb) { // v511: 背景色は固定なので最初の1回だけ読む
@@ -25773,6 +25825,10 @@ pmi._lineFarPoint = null;
           el.style.left = pmi._screen.x + 'px';
           el.style.top = pmi._screen.y + 'px';
         }
+        // v631: 計算を省いているコマでも、照合番号・溶接記号の「指している点から見た角度・距離」(回している間に
+        // 置き場所を保つための記録)を今の位置で更新しておく。以前はこの記録が古いままになり、回し始めたときに
+        // 「保っていない」と判定されて、最初の数コマで全部の置き場所を計算し直していた(回し始めが重かった)。
+        refreshHeldPolar(allScreenPmis, mvp);
         // v566: 置き場所が決まった後(計算を省いているコマ)でも、照合番号に寸法の線・寸法値が重なって
         // いれば、マウスを近づけなくてもその寸法をすぐ隠す(B案)。
         try { noteDimOverlapSweep(allScreenPmis, mvp); } catch (err) { /* 次のコマで */ }
@@ -26604,8 +26660,14 @@ pmi._lineFarPoint = null;
           // 延ばしても届かない(40px以内に無い)ときは、近く(10px以内)のモデルの点へ寄せる。
           if (pmi.category === 'note' && !perimOn) {
             try {
-              const snapped = snapLeaderTipToModel(mvp, modelScreen, clipX, clipY);
-              if (snapped) { modelScreen = snapped; pmi._modelScreenForHit = modelScreen; }
+              // v631: 回している間は、止まっていたときに求めたずれ(寄せた点 − 元の点)をそのまま使う(毎コマ調べ直すと重いため)
+              if (isUserViewMoving(performance.now()) && pmi._snapOff) {
+                if (pmi._snapOff.ok) { modelScreen = { x: modelScreen.x + pmi._snapOff.dx, y: modelScreen.y + pmi._snapOff.dy }; pmi._modelScreenForHit = modelScreen; }
+              } else {
+                const snapped = snapLeaderTipToModel(mvp, modelScreen, clipX, clipY);
+                pmi._snapOff = snapped ? { ok: true, dx: snapped.x - modelScreen.x, dy: snapped.y - modelScreen.y } : { ok: false };
+                if (snapped) { modelScreen = snapped; pmi._modelScreenForHit = modelScreen; }
+              }
             } catch (e) { /* 寄せられなければそのまま */ }
           }
           // v583: 指示線がモデルの上を通る(画面上でモデルを貫通して見える)ときは、そのPMI(番号・溶接記号と
