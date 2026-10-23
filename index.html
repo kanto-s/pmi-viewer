@@ -1171,7 +1171,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v626</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v627</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1319,6 +1319,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v627: 「PMIを一斉表示」で出ていなかったPMIが出るようにしました。(1) 直径の寸法を真横から見る向きでも、一斉表示では出すようにしました。(2) 置き場所が無いとして出していなかった照合番号・注記・溶接記号は、ほかの番号・記号もいっしょに置き直して、重ならず指示線どうしも交差しない並べ方を探すようにしました。(3) 指している継ぎ目のまわりを部品が囲んでいる所は、指している点から外へ出るまでの1区間だけ指示線がモデルの上を通ってよいことにし、溶接記号は置き場所ごとに見えている継ぎ目の点を選び直します。(4) それでも置けないものは、指示線を1回折り曲げて(JIS Z 8322)すき間を通します。指示線がほかの部品を貫通する・指示線どうしが交差する・記号どうしが重なる表示はこれまでどおり出しません。PMIがとても込み合った向きでは、まだ出せないものが残ることがあります(拡大すると出ます)。</li>
         <li>v626: 溶接記号がモデルを貫通して(モデルの上に重なって)表示されることがあった問題を直しました。これまで溶接記号は、枠の2割までならモデルに重なってもよいことにしていましたが、少しでも重なる置き場所は使わないようにしました。置き場所を選び直すときは、ほかの番号・記号の指示線と交差しない所を選びます(指示線どうしの交差は不可のまま)。モデルにも重ならず、ほかの指示線とも交差しない置き場所がどうしても無い向きでは、その溶接記号(と継ぎ目の強調)は出さず、向きを変えると出ます。</li>
         <li>v625: 照合番号(バルーン)や指示線が寸法補助線にかぶって表示されることがあった問題を直しました。これまで調べていなかった寸法(寸法値を出さず線だけ描いている寸法)の線も調べ、指示線が寸法補助線・寸法線に沿って重なるときも、その角度だけ寸法の方を出さないようにしました。一斉表示のとき(寸法はすべて出します)は、指示線が寸法線・寸法補助線に沿わない置き場所を選び、それでも指示線が沿って重なる番号・記号や、番号の丸が寸法補助線にかかる番号・記号は、その角度では出さないようにしました。</li>
         <li>v624: 動作を軽くしました。回転中に照合番号・溶接記号の置き場所を保っている間は、置き場所探しの計算を省くようにしました。また、重い端末で1コマに時間がかかると置き場所の計算を毎コマやり直してさらに重くなっていた問題を直しました。表示のされ方は変わりません。</li>
@@ -21659,7 +21660,7 @@ pmi._lineFarPoint = null;
         p._screen.x = nx; p._screen.y = ny;
         if (p._naturalScreenX != null) { p._declutterDX = nx - p._naturalScreenX; p._declutterDY = ny - p._naturalScreenY; }
         if (p._anchorScreen) { p._noteRelDX = nx - p._anchorScreen.x; p._noteRelDY = ny - p._anchorScreen.y; p._notePend = null; }
-        p._perimeterPlaced = true; p._perimBend = null; p._perimO = it.O;
+        p._perimeterPlaced = true; p._perimBend = it.bend || null; p._perimO = it.O; // v627: 折り曲げた指示線の折れ点
         if (el) { el.style.left = nx + 'px'; el.style.top = ny + 'px'; }
       }
     };
@@ -21677,13 +21678,13 @@ pmi._lineFarPoint = null;
     const key = Array.from(mvp, (v) => v.toFixed(4)).join(',') + '|' + cw + 'x' + ch + '|' + banned.map((b) => [b.x0, b.y0, b.x1, b.y1].map(Math.round).join(',')).join(';') + '|' +
       items.map((it) => it.p.id + ':' + Math.round(it.g.w) + 'x' + Math.round(it.g.h)).join(',');
     if (perimMatchCache && perimMatchCache.key === key) {
-      for (const it of items) it.C = perimMatchCache.C.get(it.p.id) || null;
+      for (const it of items) { it.C = perimMatchCache.C.get(it.p.id) || null; it.bend = (perimMatchCache.B && perimMatchCache.B.get(it.p.id)) || null; }
       apply(); return;
     }
     // 回している間は並べ直さず、止めたときの「指す点からのずれ」を保ったまま一緒に動かす(軽くするため)
     if (moving && perimMatchRel) {
       let all = true;
-      for (const it of items) { const r = perimMatchRel.get(it.p.id); if (r === undefined) { all = false; break; } it.C = r ? { x: it.O.x + r.dx, y: it.O.y + r.dy } : null; } // v622: 隠したものは隠したまま
+      for (const it of items) { const r = perimMatchRel.get(it.p.id); if (r === undefined) { all = false; break; } it.C = r ? { x: it.O.x + r.dx, y: it.O.y + r.dy } : null; it.bend = r && r.b ? { x: it.O.x + r.b.dx, y: it.O.y + r.b.dy } : null; } // v622: 隠したものは隠したまま
       if (all) { apply(); return; }
     }
     // モデルの絵(升目): 三角形を4px升目に塗る(指示線がモデルの上を通るかを速く調べるため)
@@ -22335,7 +22336,7 @@ pmi._lineFarPoint = null;
     // 残るものは、かぶらない所(モデルにも重ならない所)へ移す。移せる所が無ければ、この向きでは出さない
     // (かぶったままは絶対に出さない)。指示線が交差してよいのは寸法線・寸法補助線だけ。
     if (!moving) {
-      const tG = performance.now() + 1500;
+      const tG = performance.now() + 800; // v627: 1500→800(先に全部をいっしょに置き直すので)
       const startOf = (it, C) => {
         if (it.knee) { const sg = it.O.x >= C.x ? 1 : -1; return { x: C.x + sg * it.knee.ax, y: C.y + it.knee.ky }; }
         const dx = it.O.x - C.x, dy = it.O.y - C.y;
@@ -22346,9 +22347,9 @@ pmi._lineFarPoint = null;
       for (const it of items) { if (it.C) it.S = startOf(it, it.C); if (it.keepEnd == null) it.keepEnd = 22; }
       const live = () => items.filter((it) => it.C);
       const lenAt = (it, C) => { const S = startOf(it, C); return Math.hypot(S.x - it.O.x, S.y - it.O.y); };
-      const nearCands = (it, maxR) => {
+      const nearCands = (it, maxR, stepR) => {
         const out = [];
-        for (let r = 16; r <= maxR; r += 12) for (let k = 0; k < 32; k++) {
+        for (let r = 16; r <= maxR; r += (stepR || 12)) for (let k = 0; k < 32; k++) {
           const an = (k / 32) * Math.PI * 2, ux = Math.cos(an), uy = Math.sin(an);
           const ext = Math.min(Math.abs(ux) > 1e-6 ? it.g.w / 2 / Math.abs(ux) : Infinity, Math.abs(uy) > 1e-6 ? it.g.h / 2 / Math.abs(uy) : Infinity);
           out.push({ x: it.O.x + ux * (r + ext), y: it.O.y + uy * (r + ext) });
@@ -22357,11 +22358,29 @@ pmi._lineFarPoint = null;
       };
       const pairHard = (it, C, S, o) => {
         const R = rectAt(it, C), Ro = rectAt(o, o.C);
-        if (ov(R, Ro, 3)) return true;
-        if (segTouchesRect(S, it.O, Ro, 3) || segTouchesRect(o.S, o.O, R, 3)) return true;
+        if (ov(R, Ro, 5)) return true; // v627: 実際に描く枠との差で最後の確認に引っかからないよう、すき間を少し広く(3→5px)
+        if (segTouchesRect(S, it.O, Ro, 5) || segTouchesRect(o.S, o.O, R, 5)) return true;
         return leaderSegsConflict(S, it.O, o.S, o.O);
       };
-      const selfHard = (it, C, S) => { const R = rectAt(it, C); return dimRects.some((d) => ov(R, d, 1) || segTouchesRect(S, it.O, d, 1)) || segOnModel(S, it.O, it.keepEnd) > 0; };
+      // v627: 指している点がモデルの絵の内側(継ぎ目のまわりを部品が囲んでいる所など)にあり、どこから引いても
+      // 指示線がモデルの上を通ってしまうものは、指している点から外へ出るまでの1区間(LEADER_EXIT_MAX px まで)だけは
+      // モデルの上を通ってよいことにする(いったん外へ出たあと、ほかの部品の上をもう一度通るのは不可)。
+      // 一斉表示で、置き場所が無いとして出していなかったPMIを出すため。
+      const LEADER_EXIT_MAX = 90;
+      const leaderExitBad = (S, O) => {
+        const L = Math.hypot(S.x - O.x, S.y - O.y), nn = Math.ceil(L / 3);
+        let out = false, run = 0;
+        for (let k = 1; k < nn; k++) {
+          const x = O.x + (S.x - O.x) * k / nn, y = O.y + (S.y - O.y) * k / nn;
+          const gx = Math.floor(x / CS), gy = Math.floor(y / CS);
+          const on = gx >= 0 && gy >= 0 && gx < GW && gy < GH && mGrid[gy * GW + gx] === 1;
+          if (on) { if (out) return true; run = (k / nn) * L; } else out = true;
+        }
+        return run > LEADER_EXIT_MAX;
+      };
+      const leaderModelBad = (it, S) => it.relaxLeader ? leaderExitBad(S, it.O) : segOnModel(S, it.O, it.keepEnd) > 0;
+      // v627: 指示線が寸法線・寸法補助線に沿って重なる置き方も、最後の確認(finalLeaderGuard)で隠されるので最初から使わない
+      const selfHard = (it, C, S) => { const R = rectAt(it, C); return dimRects.some((d) => ov(R, d, 1) || segTouchesRect(S, it.O, d, 1)) || leaderModelBad(it, S) || leaderRunsAlongSegs(S, it.O, dimSegs); };
       const nHard = (it, L) => { let k = selfHard(it, it.C, it.S) ? 1 : 0; for (const o of L) if (o !== it && pairHard(it, it.C, it.S, o)) k++; return k; };
       const candOk = (it, C, L) => {
         const S = startOf(it, C), R = rectAt(it, C);
@@ -22372,6 +22391,127 @@ pmi._lineFarPoint = null;
         for (const o of L) if (o !== it && pairHard(it, C, S, o)) return false;
         return true;
       };
+      // v627: まだ出せていないものは、それとじゃまをしているもの(まとめて8つまで)を、いっしょに置き直す。
+      // それぞれの置き場所の候補(モデル・寸法値・寸法線・部品表などにかからない所)から、互いに重ならず
+      // 指示線どうしも交差しない組み合わせを、指示線の短い候補から順に探す(見つかれば全部出せる)。
+      const tM = performance.now() + 600;
+      const staticCands = (it, fixed) => {
+        const out = [];
+        const r0 = it.relaxLeader, O0 = it.O;
+        const isWeld = !!it.knee && it.p.category === 'weld';
+        for (const relax of [false, true]) {
+          it.relaxLeader = relax;
+          let tipTries = 0;
+          for (const C of nearCands(it, 600, 24)) {
+            it.O = O0;
+            let S = startOf(it, C);
+            const R = rectAt(it, C);
+            if (!inScreen(R) || rectOnModel({ x0: R.x0 - 2, x1: R.x1 + 2, y0: R.y0 - 2, y1: R.y1 + 2 }) || dimTouch(R, 1)) continue;
+            const okAt = () => !banned.some((b2) => ov(R, b2, 0) || segTouchesRect(S, it.O, b2, 1)) && !selfHard(it, C, S) && !fixed.some((o) => pairHard(it, C, S, o));
+            let tip = null;
+            if (!okAt()) {
+              // 溶接記号は、この置き場所から見えている継ぎ目の別の点を指せば通るかを確かめる
+              if (!isWeld || performance.now() > tM || ++tipTries > 40) continue;
+              let r = null;
+              try { r = bestWeldTipFrom(it.p, mvp, { x: S.x, y: S.y }, it.p._weldTipLocal); } catch (e) { r = null; }
+              if (!r || !r.screen || Math.hypot(r.screen.x - O0.x, r.screen.y - O0.y) < 1) continue;
+              it.O = { x: r.screen.x, y: r.screen.y }; S = startOf(it, C);
+              if (!okAt()) continue;
+              tip = r;
+            }
+            out.push({ C, S, relax, O: it.O, tip, l: Math.hypot(S.x - it.O.x, S.y - it.O.y) });
+          }
+          if (out.length >= 6) break;
+        }
+        it.relaxLeader = r0; it.O = O0;
+        out.sort((p1, p2) => p1.l - p2.l);
+        // 向きがかたよらないよう、32方向それぞれで、指示線の長さが60px以上ちがうものを短い方から4つまでに絞る
+        const per = new Map(), pick = [];
+        for (const c of out) {
+          const k = Math.round(((Math.atan2(c.C.y - it.O.y, c.C.x - it.O.x) + Math.PI) / (Math.PI * 2)) * 32) % 32;
+          const m = per.get(k) || [];
+          if (m.length >= 4 || m.some((l) => Math.abs(l - c.l) < 60)) continue;
+          m.push(c.l); per.set(k, m); pick.push(c);
+        }
+        return pick;
+      };
+      // まず、全部(30まで)をいっしょに置き直す。候補の少ないものから順に決め、決めるたびに残りの候補から
+      // かぶるものを除く(どれかの候補が無くなれば、すぐ戻ってやり直す)。今の置き場所を第一の候補にする(なるべく動かさない)
+      // (かぶりが無ければ何もしない。どうしても置けないものがあると全体が解けないので、解けなかったときは、
+      //  いちばん行き詰まりの原因になったものを外して(あとで折り曲げなどで置く)、4回までやり直す)
+      if (items.some((it) => !it.C || nHard(it, live()) > 0) && items.length <= 30) {
+       let grp = items.slice();
+       const save0 = items.map((it) => ({ it, C: it.C, S: it.S, relax: it.relaxLeader, O: it.O }));
+       for (let attempt = 0; attempt < 8 && grp.length && performance.now() < tM; attempt++) {
+        const save = grp.map((it) => ({ it, C: it.C, S: it.S, relax: it.relaxLeader, O: it.O }));
+        const cands = grp.map((it) => {
+          if (it._cands0) return it._cands0;
+          const cs2 = staticCands(it, []);
+          if (it.C && !selfHard(it, it.C, it.S)) cs2.unshift({ C: it.C, S: it.S, relax: !!it.relaxLeader, O: it.O, tip: null, l: 0 });
+          it._cands0 = cs2;
+          return cs2;
+        });
+        const fails = new Array(grp.length).fill(0);
+        const empty = cands.findIndex((c) => !c.length);
+        if (empty >= 0) { grp[empty].C = null; grp[empty].S = null; grp = grp.filter((x, i) => i !== empty); continue; }
+        {
+          // 候補どうしがかぶるかの結果を覚えておく(同じ組み合わせを何度も調べないように)
+          let nC = 0; for (const cl of cands) for (const c of cl) c._ix = nC++;
+          const memo = nC <= 1500 ? new Uint8Array(nC * nC) : null;
+          const compat = (i, a, j, b) => {
+            if (memo) { const m = memo[a._ix * nC + b._ix]; if (m) return m === 1; }
+            const r = compat0(i, a, j, b);
+            if (memo) { memo[a._ix * nC + b._ix] = r ? 1 : 2; memo[b._ix * nC + a._ix] = r ? 1 : 2; }
+            return r;
+          };
+          const compat0 = (i, a, j, b) => {
+            const I = grp[i], J = grp[j];
+            const sv = [J.C, J.S, J.O, I.O, I.relaxLeader];
+            J.C = b.C; J.S = b.S; J.O = b.O; I.O = a.O; I.relaxLeader = a.relax;
+            const bad = pairHard(I, a.C, a.S, J);
+            J.C = sv[0]; J.S = sv[1]; J.O = sv[2]; I.O = sv[3]; I.relaxLeader = sv[4];
+            return !bad;
+          };
+          const choice = new Array(grp.length).fill(null);
+          let steps = 0, timeout = false;
+          const dfs = (dom) => {
+            if ((++steps & 31) === 0 && performance.now() > tM) { timeout = true; return false; }
+            let k = -1;
+            for (let i = 0; i < grp.length; i++) if (!choice[i] && (k < 0 || dom[i].length < dom[k].length)) k = i;
+            if (k < 0) return true;
+            for (const c of dom[k]) {
+              choice[k] = c;
+              const nd = dom.slice();
+              let dead = false;
+              for (let i = 0; i < grp.length && !dead; i++) {
+                if (choice[i]) continue;
+                nd[i] = dom[i].filter((b) => compat(k, c, i, b));
+                if (!nd[i].length) { dead = true; fails[i]++; fails[k] += 2; }
+              }
+              if (!dead && dfs(nd)) return true;
+              choice[k] = null;
+              if (timeout) return false;
+            }
+            return false;
+          };
+          if (dfs(cands)) {
+            grp.forEach((it, i) => {
+              const c = choice[i];
+              it.C = c.C; it.S = c.S; it.O = c.O; it.relaxLeader = c.relax; it.kind = 'N';
+              if (c.tip) { const r = c.tip; it.p._weldTipLocal = r.local; it.p._weldTipAng = r.ang || 0; it.p._weldTipCacheKey = null; }
+            });
+            // 外したものは、今の置き場所でかぶらなければそのまま、かぶるならあとで置き場所を探す
+            for (const sv of save0) if (!grp.includes(sv.it)) { sv.it.C = sv.C; sv.it.S = sv.S; sv.it.O = sv.O; sv.it.relaxLeader = sv.relax; }
+            for (const it of items) if (!grp.includes(it) && it.C && nHard(it, live()) > 0) { it.C = null; it.S = null; }
+            break;
+          }
+          for (const sv of save) { sv.it.C = sv.C; sv.it.S = sv.S; sv.it.relaxLeader = sv.relax; sv.it.O = sv.O; }
+          if (timeout) break;
+          let worstI = 0; for (let i = 1; i < grp.length; i++) if (fails[i] > fails[worstI]) worstI = i;
+          grp = grp.filter((x, i) => i !== worstI);
+        }
+       }
+      }
       for (let guard = 0; guard < items.length * 2; guard++) {
         const L = live();
         let worst = null, wn = 0, wl = -1;
@@ -22396,15 +22536,155 @@ pmi._lineFarPoint = null;
             best = c.C; break;
           }
           if (!best) worst.O = O0;
+          // v627: 置き場所が無いときは、指示線が指している点から外へ出るまでの1区間だけモデルの上を通るのを許して、
+          // もう一度探す(溶接記号は、置き場所ごとに見えている継ぎ目の点を選び直す)。それでも無いときだけ出さない
+          if (!best && !worst.relaxLeader) {
+            const tR = Math.min(performance.now() + 300, tG + 300); // v627: 全体の時間の上限も守る
+            worst.relaxLeader = true;
+            for (const c of cs) {
+              if (performance.now() > tR) break;
+              worst.O = O0; worst._tipNew = null;
+              let ok = candOk(worst, c.C, L);
+              if (!ok && worst.knee && worst.p.category === 'weld') {
+                try {
+                  const S1 = startOf(worst, c.C);
+                  const r = bestWeldTipFrom(worst.p, mvp, { x: S1.x, y: S1.y }, worst.p._weldTipLocal);
+                  if (r && r.screen) { worst.O = { x: r.screen.x, y: r.screen.y }; ok = candOk(worst, c.C, L); if (ok) worst._tipNew = r; }
+                } catch (e) { ok = false; }
+              }
+              if (ok) { best = c.C; break; }
+            }
+            if (!best) { worst.O = O0; worst.relaxLeader = false; }
+          }
+          // v627: それでも無いときは、じゃまをしている1つ(番号・記号・指示線)を別の置き場所へ移せば両方とも
+          // かぶらずに置けるなら、そうする(1つずつ動かすだけでは解けない込み入った所でも、全部出すため)
+          if (!best) {
+            const tP = Math.min(performance.now() + 300, tG + 400);
+            const tryPair = (relax) => {
+              worst.relaxLeader = relax;
+              for (const c of cs) {
+                if (performance.now() > tP) return false;
+                worst.O = O0;
+                const others = L.filter((o) => o !== worst);
+                const S = startOf(worst, c.C);
+                const blockers = others.filter((o) => pairHard(worst, c.C, S, o));
+                if (blockers.length !== 1) continue;
+                const o = blockers[0];
+                if (!candOk(worst, c.C, others.filter((x) => x !== o))) continue;
+                const oC0 = o.C, oS0 = o.S;
+                worst.C = c.C; worst.S = S;
+                const L2 = L.filter((x) => x !== o);
+                const ocs = nearCands(o, 600).map((C) => ({ C, l: lenAt(o, C) })).sort((p1, p2) => p1.l - p2.l);
+                let found = null;
+                for (const oc of ocs) {
+                  if (performance.now() > tP) break;
+                  if (candOk(o, oc.C, L2)) { found = oc.C; break; }
+                }
+                if (found) { o.C = found; o.S = startOf(o, found); o.kind = 'N'; best = c.C; return true; }
+                worst.C = null; worst.S = null; o.C = oC0; o.S = oS0;
+              }
+              return false;
+            };
+            const wC0 = worst.C, wS0 = worst.S;
+            if (!tryPair(false) && !tryPair(true)) { worst.relaxLeader = false; worst.O = O0; worst.C = wC0; worst.S = wS0; }
+          }
         }
         if (best) {
           worst.C = best; worst.S = startOf(worst, best); worst.kind = 'N';
           if (worst._tipNew) { const r = worst._tipNew; worst.p._weldTipLocal = r.local; worst.p._weldTipAng = r.ang || 0; worst.p._weldTipCacheKey = null; worst._tipNew = null; }
         } else { worst.C = null; worst.S = null; }
       }
+      const tM2 = performance.now() + 120; // 全部いっしょの置き直しで解けなかったときの、部分ごとの置き直し(短く)
+      for (const h of items) {
+        if (h.C || performance.now() > tM2) continue;
+        const L0 = live();
+        // じゃまをしているもの: hのいくつかの置き場所の候補で、かぶる相手
+        const block = new Map();
+        for (const C of nearCands(h, 400)) {
+          const S = startOf(h, C), R = rectAt(h, C);
+          if (!inScreen(R) || rectOnModel(R)) continue;
+          for (const o of L0) if (pairHard(h, C, S, o)) block.set(o, (block.get(o) || 0) + 1);
+        }
+        const grp = [h].concat([...block.entries()].sort((x, y) => y[1] - x[1]).slice(0, 7).map((e) => e[0]));
+        if (grp.length < L0.length + 1 && L0.length <= 24) { for (const o of L0) if (!grp.includes(o)) grp.push(o); } // 全部いっしょに置き直す(24まで)
+        const fixed = L0.filter((o) => !grp.includes(o));
+        const save = grp.map((it) => ({ it, C: it.C, S: it.S, relax: it.relaxLeader, O: it.O }));
+        const cands = grp.map((it) => staticCands(it, fixed));
+        if (cands.some((c) => !c.length)) continue;
+        const ord = grp.map((it, k) => k).sort((x, y) => cands[x].length - cands[y].length);
+        for (const it of grp) { it.C = null; it.S = null; }
+        const placed = [];
+        let ok = false, steps = 0;
+        const dfs = (d) => {
+          if (d === ord.length) return true;
+          if ((++steps & 63) === 0 && performance.now() > tM2) return false;
+          const k = ord[d], it = grp[k];
+          for (const c of cands[k]) {
+            it.relaxLeader = c.relax; it.O = c.O; it._tipNew = c.tip;
+            if (placed.some((o) => pairHard(it, c.C, c.S, o))) continue;
+            it.C = c.C; it.S = c.S; placed.push(it);
+            if (dfs(d + 1)) return true;
+            placed.pop(); it.C = null; it.S = null;
+            if (performance.now() > tM2) return false;
+          }
+          return false;
+        };
+        ok = dfs(0);
+        if (ok) {
+          for (const it of grp) {
+            it.kind = 'N';
+            if (it._tipNew) { const r = it._tipNew; it.p._weldTipLocal = r.local; it.p._weldTipAng = r.ang || 0; it.p._weldTipCacheKey = null; }
+            it._tipNew = null;
+          }
+        } else for (const sv of save) { sv.it.C = sv.C; sv.it.S = sv.S; sv.it.relaxLeader = sv.relax; sv.it.O = sv.O; sv.it._tipNew = null; }
+      }
+      // v627: それでも出せないものは、指示線を1回折り曲げて(JIS Z 8322: 引出線は折り曲げてもよい)、モデルの
+      // すき間を通して指す。指している点から、外へ出るまでの1区間だけモデルの上を通って折れ点へ出て、
+      // 折れ点から記号までは、モデル・寸法値・ほかの番号・記号・指示線のどれにもかからない道筋にする。
+      const tB = performance.now() + 300;
+      const segsOf = (it) => it.bend ? [[it.S, it.bend], [it.bend, it.O]] : [[it.S, it.O]];
+      for (const h of items) {
+        if (h.C || performance.now() > tB) continue;
+        const L0 = live();
+        const others = L0.map((o) => ({ o, R: rectAt(o, o.C), segs: segsOf(o) }));
+        let done = false;
+        for (let r = 18; r <= 96 && !done; r += 12) {
+          for (let k = 0; k < 24 && !done; k++) {
+            if (performance.now() > tB) break;
+            const an = (k / 24) * Math.PI * 2, B = { x: h.O.x + Math.cos(an) * r, y: h.O.y + Math.sin(an) * r };
+            const gbx = Math.floor(B.x / CS), gby = Math.floor(B.y / CS);
+            if (gbx < 0 || gby < 0 || gbx >= GW || gby >= GH || mGrid[gby * GW + gbx]) continue; // 折れ点はモデルの外
+            if (leaderExitBad(B, h.O)) continue;
+            if (dimRects.some((d) => segTouchesRect(B, h.O, d, 1)) || banned.some((b2) => segTouchesRect(B, h.O, b2, 1))) continue;
+            if (others.some((e) => segTouchesRect(B, h.O, e.R, 3) || e.segs.some(([a2, b2]) => leaderSegsConflict(B, h.O, a2, b2)))) continue;
+            const hb = { O: B, g: h.g, knee: h.knee };
+            const cs2 = nearCands(hb, 400).map((C) => ({ C, l: Math.hypot(C.x - B.x, C.y - B.y) })).sort((p1, p2) => p1.l - p2.l);
+            for (const c of cs2) {
+              const S = startOf(hb, c.C), R = rectAt(h, c.C);
+              if (!inScreen(R) || banned.some((b2) => ov(R, b2, 0) || segTouchesRect(S, B, b2, 1))) continue;
+              if (rectOnModel({ x0: R.x0 - 2, x1: R.x1 + 2, y0: R.y0 - 2, y1: R.y1 + 2 }) || dimTouch(R, 1)) continue;
+              if (segOnModel(S, B, 0) > 0) continue;
+              if (dimRects.some((d) => ov(R, d, 1) || segTouchesRect(S, B, d, 1))) continue;
+              // 折れ点では、2本の線がはっきり折れて見えるように(ほぼまっすぐ・折り返しは使わない)
+              const v1x = S.x - B.x, v1y = S.y - B.y, v2x = h.O.x - B.x, v2y = h.O.y - B.y;
+              const cs3 = (v1x * v2x + v1y * v2y) / ((Math.hypot(v1x, v1y) * Math.hypot(v2x, v2y)) || 1);
+              if (cs3 > 0.2 || cs3 < -0.985) continue;
+              const mine = [[S, B], [B, h.O]];
+              let bad = false;
+              for (const e of others) {
+                if (ov(R, e.R, 3)) { bad = true; break; }
+                if (mine.some(([a2, b2]) => segTouchesRect(a2, b2, e.R, 3)) || e.segs.some(([a2, b2]) => segTouchesRect(a2, b2, R, 3))) { bad = true; break; }
+                if (mine.some(([a2, b2]) => e.segs.some(([c2, d2]) => leaderSegsConflict(a2, b2, c2, d2)))) { bad = true; break; }
+              }
+              if (bad) continue;
+              h.C = c.C; h.S = S; h.bend = B; h.kind = 'N'; done = true; break;
+            }
+          }
+        }
+      }
     }
-    perimMatchCache = { key, C: new Map(items.filter((it) => it.C).map((it) => [it.p.id, it.C])) };
-    perimMatchRel = new Map(items.map((it) => [it.p.id, it.C ? { dx: it.C.x - it.O.x, dy: it.C.y - it.O.y } : null]));
+    perimMatchCache = { key, C: new Map(items.filter((it) => it.C).map((it) => [it.p.id, it.C])), B: new Map(items.filter((it) => it.C && it.bend).map((it) => [it.p.id, it.bend])) };
+    perimMatchRel = new Map(items.map((it) => [it.p.id, it.C ? { dx: it.C.x - it.O.x, dy: it.C.y - it.O.y, b: it.bend ? { dx: it.bend.x - it.O.x, dy: it.bend.y - it.O.y } : null } : null]));
     window.__perimMs = performance.now() - T0;
     apply();
   }
@@ -24533,6 +24813,7 @@ pmi._lineFarPoint = null;
           // v513: 境目(65°)付近で揺らがないよう、表示中は約69°まで残し、非表示中は約61°まで戻らない
           diamHide = pmi._diamHidePrev ? dot < 0.48 : dot < 0.36;
           pmi._diamHidePrev = diamHide;
+          if (showAllAtOnce) diamHide = false; // v627: 「PMIを一斉表示」では、直径の寸法を真横から見る向きでも出す(全部出す)
           if (diamHide && (pmi._ghost || canGhostPmi(pmi))) { makePmiGhost(pmi); diamHide = false; }
         }
         pmi._diamHideRealGraphic = diamHide;
