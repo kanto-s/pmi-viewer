@@ -1171,7 +1171,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v629</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v630</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1319,6 +1319,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v630: 照合番号などの注記の表示位置がばらばらに見えないよう、近くの注記どうしの縦・横の位置をそろえて、行と列(四角形の辺)に並ぶようにしました。指示線の長さの上限(指している配管から50px以内)は守り、そろえるとモデル・寸法・ほかの記号にかかる場合や、指示線がほかの部品の上を通る・交差する場合はそろえません(通常表示のみ)。</li>
         <li>v629: 回転を止めたと判定するまでの待ち時間を、120msから60msにさらに短くしました。描画に時間がかかる端末では、これまでどおり1コマの間隔に合わせて待ち時間をのばします(回している途中で「止めた」と誤って判定しないため)。</li>
         <li>v628: 回転を止めてからワンテンポ遅れてモデルが回ったり、PMIが表示されたりする問題を改善しました。(1) 照合番号・溶接記号の置き場所の割り当てに、ハンガリアン法(割り当て問題の解法)を使うようにしました。1件ずつのコストの合計が最小になる割り当てを先に求め、指示線の交差や重なりが減る入れ替えで仕上げてから、時間の許す範囲で総当たりで確かめます。(2) 回転を止めたと判定するまでの待ち時間を180msから120msに短くしました。描画に時間がかかる端末では、回している途中に「止めた」と誤って判定しないよう、待ち時間を1コマの間隔に合わせてのばします。(3) 止めたあとの置き場所の計算が3コマ続けて同じ結果になったら、計算し直しを早めに終えるようにしました。(4) 描画(GPU)が追いつかない端末では、回している間だけ描画の解像度を下げ、止めた瞬間に元に戻します。</li>
         <li>v627: 「PMIを一斉表示」で出ていなかったPMIが出るようにしました。(1) 直径の寸法を真横から見る向きでも、一斉表示では出すようにしました。(2) 置き場所が無いとして出していなかった照合番号・注記・溶接記号は、ほかの番号・記号もいっしょに置き直して、重ならず指示線どうしも交差しない並べ方を探すようにしました。(3) 指している継ぎ目のまわりを部品が囲んでいる所は、指している点から外へ出るまでの1区間だけ指示線がモデルの上を通ってよいことにし、溶接記号は置き場所ごとに見えている継ぎ目の点を選び直します。(4) それでも置けないものは、指示線を1回折り曲げて(JIS Z 8322)すき間を通します。指示線がほかの部品を貫通する・指示線どうしが交差する・記号どうしが重なる表示はこれまでどおり出しません。PMIがとても込み合った向きでは、まだ出せないものが残ることがあります(拡大すると出ます)。</li>
@@ -20756,6 +20757,138 @@ pmi._lineFarPoint = null;
       E.el.style.visibility = 'hidden';
     }
   }
+  // v630: 「注記の表示位置が少しバラバラなので四角形を描くように配置してほしい」との要望。
+  // 照合番号の指示線の長さの上限(NOTE_MAX_LEADER_PX)はそのまま守り、そのうえで近くの番号どうしの
+  // 縦・横の位置をそろえて、行と列(四角形の辺)に並ぶようにする(通常表示のみ)。
+  //  1) 2つの番号の組ごとに「横の位置(x)をそろえる(同じ列)」「縦の位置(y)をそろえる(同じ行)」を考え、
+  //     ずれが NOTE_ALIGN_MAX_PX 以内のものを、ずれの小さい順に試す。そろえると指示線が長くなりすぎる場合は、
+  //     もう一方の軸を指している点の側へ寄せた位置も試す。
+  //  2) 動かした先が、モデル・寸法(線・寸法値・寸法で囲まれた範囲)・ほかの番号や溶接記号にかからず、
+  //     指示線が上限より長くならず、ほかの部品の上を通らず、ほかの指示線と交差しないときだけ動かす。
+  //  3) そろえた軸(x または y)はその後は動かさない(あとでそろえた別の組にくずされないように)。
+  const NOTE_ALIGN_MAX_PX = 60;
+  function alignNotesTidy(allScreenPmis, mvp) {
+    if (showAllAtOnce || isUserViewMoving(performance.now())) return;
+    if (hoverDimId) return; // マウスを近づけて寸法を拡大している間は注記を動かさない(v515)
+    const t0 = performance.now();
+    const items = [];
+    const peers = [];
+    for (const p of allScreenPmis) {
+      if (!p._screen || p.asRecorded || !(p.category === 'note' || p.category === 'weld')) continue;
+      const el = markerEls.get(p.id);
+      if (!el || el.style.display === 'none' || el.style.visibility === 'hidden' || el.style.opacity === '0') continue;
+      const g = measureTagCenterOffset(p);
+      if (!g || !(g.w > 0)) continue;
+      const oL = leaderModelPoint(p);
+      const O = (oL && !p._noModelLeader) ? project(mvp, oL) : null;
+      const it = { p, g, O, C: { x: p._screen.x + g.offX, y: p._screen.y + g.offY }, lockX: false, lockY: false };
+      peers.push(it);
+      if (p.category === 'note' && O && !p._noModelLeader && !tableGridAxes(p)) items.push(it);
+    }
+    if (items.length < 2) return;
+    const cover = getScreenCover(mvp);
+    if (!cover) return;
+    const cw = cvSize().w, ch = cvSize().h, cr = cvRect();
+    let dimSegs = []; try { dimSegs = collectDimScreenSegs(allScreenPmis, mvp); } catch (e) { dimSegs = []; }
+    const dimQ = makeSegGrid(dimSegs);
+    const dimRects = [];
+    for (const q of allScreenPmis) {
+      if (q.category !== 'dimension' || q._dimWholeHidden || q._dimThinHidden) continue;
+      const el = markerEls.get(q.id);
+      if (!el || el.style.display === 'none') continue;
+      let r = q._dimFinalRect;
+      if (!r) { const tg = el.querySelector('.pmi-tag'); if (tg) { const br = tg.getBoundingClientRect(); if (br.width > 0 && br.height > 0) r = br; } }
+      r = dimRectForNoteLayout(q, r);
+      if (r) dimRects.push({ x0: r.left - cr.left, x1: r.right - cr.left, y0: r.top - cr.top, y1: r.bottom - cr.top });
+    }
+    let dimAreas = []; try { dimAreas = collectDimScreenAreas(mvp); } catch (e) { dimAreas = []; }
+    const ribbonBottom = getRibbonHeightPx();
+    const banned = [];
+    { const d = getPartsTableDockRect(); if (d) banned.push({ x0: d.x0 - PTABLE_DOCK_GAP_PX, y0: d.y0 - PTABLE_DOCK_GAP_PX, x1: d.x1, y1: d.y1 }); }
+    { const b = getBomDrawerRect(); if (b) banned.push({ x0: b.x0 - PTABLE_DOCK_GAP_PX, y0: b.y0 - PTABLE_DOCK_GAP_PX, x1: b.x1, y1: b.y1 }); }
+    { const el = document.getElementById('occPanel');
+      if (el && !el.hidden) { const r = el.getBoundingClientRect(); banned.push({ x0: r.left - cr.left, y0: r.top - cr.top, x1: r.right - cr.left + 8, y1: r.bottom - cr.top + 8 }); } }
+    const ov = (a, b, m) => a.x0 - m < b.x1 && b.x0 - m < a.x1 && a.y0 - m < b.y1 && b.y0 - m < a.y1;
+    // 枠と、指示線が枠から出る点(K)
+    const shapeAt = (it, P) => {
+      const g = it.g, O = it.O;
+      const r = { x0: P.x - g.w / 2, x1: P.x + g.w / 2, y0: P.y - g.h / 2, y1: P.y + g.h / 2 };
+      if (!O) return { r, K: null };
+      const dx = O.x - P.x, dy = O.y - P.y, d = Math.hypot(dx, dy) || 1, rad = Math.max(g.w, g.h) / 2;
+      let K;
+      if (it.p.noteShape === 'circle' || isRoundNoteOutline(it.p)) K = { x: P.x + dx / d * Math.min(rad, d), y: P.y + dy / d * Math.min(rad, d) };
+      else {
+        const tx = Math.abs(dx) > 1e-6 ? g.w / 2 / Math.abs(dx) : Infinity, ty = Math.abs(dy) > 1e-6 ? g.h / 2 / Math.abs(dy) : Infinity;
+        const t = Math.min(1, tx, ty);
+        K = { x: P.x + dx * t, y: P.y + dy * t };
+      }
+      return { r, K };
+    };
+    const onModel = (r) => {
+      for (let i = 0; i < 5; i++) for (let j = 0; j < 5; j++) {
+        const x = r.x0 + 1 + (r.x1 - r.x0 - 2) * (i + 0.5) / 5, y = r.y0 + 1 + (r.y1 - r.y0 - 2) * (j + 0.5) / 5;
+        if (cover.at(x, y) || (cover.atFine && cover.atFine(x, y))) return true;
+      }
+      return false;
+    };
+    // その位置に動かしてよいか(照合番号の最終確認 noteFinalDimCheck と同じ条件)
+    const okAt = (it, P) => {
+      const s = shapeAt(it, P), r = s.r, O = it.O, rad = Math.max(it.g.w, it.g.h) / 2;
+      if (r.x0 < 4 || r.y0 < Math.max(4, ribbonBottom + 4) || r.x1 > cw - 4 || r.y1 > ch - 4) return false;
+      if (banned.some((b) => ov(r, b, 0))) return false;
+      if (Math.hypot(P.x - O.x, P.y - O.y) < rad + 4) return false;
+      if (Math.hypot(s.K.x - O.x, s.K.y - O.y) > NOTE_MAX_LEADER_PX) return false;
+      for (const o of peers) {
+        if (o === it) continue;
+        const so = shapeAt(o, o.C);
+        if (ov(r, so.r, 4)) return false;
+        if (segTouchesRect(s.K, O, so.r, 2)) return false;
+        if (so.K && o.O) { if (segTouchesRect(so.K, o.O, r, 2) || segCrossesSeg(s.K, O, so.K, o.O)) return false; }
+      }
+      for (const [a, b] of dimQ(r.x0 - NOTE_DIM_CLEAR_PX - 1, r.y0 - NOTE_DIM_CLEAR_PX - 1, r.x1 + NOTE_DIM_CLEAR_PX + 1, r.y1 + NOTE_DIM_CLEAR_PX + 1)) if (segTouchesRect(a, b, r, NOTE_DIM_CLEAR_PX)) return false;
+      for (const d of dimRects) { if (ov(r, d, 3) || segTouchesRect(s.K, O, d, 2)) return false; }
+      if (rectInDimArea(r, dimAreas)) return false;
+      if (onModel(r)) return false;
+      if (noteLeaderOtherFrac(cover, s.K, O, it.p) > 0) return false;
+      return true;
+    };
+    // そろえる候補(動かす量の小さい順)
+    const cands = [];
+    for (const a of items) for (const b of items) {
+      if (a === b) continue;
+      const dx = Math.abs(b.C.x - a.C.x), dy = Math.abs(b.C.y - a.C.y);
+      if (dx > 0.5 && dx <= NOTE_ALIGN_MAX_PX) cands.push({ it: a, to: b, axis: 'x', d: dx });
+      if (dy > 0.5 && dy <= NOTE_ALIGN_MAX_PX) cands.push({ it: a, to: b, axis: 'y', d: dy });
+    }
+    cands.sort((u, v) => u.d - v.d);
+    let moved = false;
+    for (const c of cands) {
+      if (performance.now() - t0 > 6) break; // 時間をかけすぎない
+      const it = c.it, to = c.to;
+      if (c.axis === 'x' ? it.lockX : it.lockY) continue;
+      // そろえる軸の位置は相手に合わせ、もう一方の軸は、今の位置から指している点の側へ少しずつ寄せた位置も試す
+      // (縦・横をそろえると指示線が上限より長くなる場合に、指している点に近づけて上限内に収める)
+      const tries = [];
+      const other = c.axis === 'x' ? it.C.y : it.C.x, toward = c.axis === 'x' ? it.O.y : it.O.x;
+      const dir = Math.sign(toward - other);
+      for (let k = 0; k <= 10; k++) {
+        const v = other + dir * k * 6;
+        if (k > 0 && (dir === 0 || Math.abs(v - other) > Math.abs(toward - other))) break;
+        tries.push(c.axis === 'x' ? { x: to.C.x, y: v } : { x: v, y: to.C.y });
+      }
+      let P = null;
+      for (const Q of tries) { if (okAt(it, Q)) { P = Q; break; } }
+      if (!P || (Math.abs(P.x - it.C.x) < 0.5 && Math.abs(P.y - it.C.y) < 0.5)) continue;
+      if (Math.hypot(P.x - it.C.x, P.y - it.C.y) > NOTE_ALIGN_MAX_PX * 1.6) continue;
+      it.C = P;
+      if (c.axis === 'x') { it.lockX = true; to.lockX = true; } else { it.lockY = true; to.lockY = true; }
+      const p = it.p;
+      p._screen.x = P.x - it.g.offX; p._screen.y = P.y - it.g.offY;
+      if (p._anchorScreen) { p._noteRelDX = p._screen.x - p._anchorScreen.x; p._noteRelDY = p._screen.y - p._anchorScreen.y; p._notePend = null; }
+      moved = true;
+    }
+    return moved;
+  }
   // v566: 表示中の照合番号(注記)と重なっている寸法を、その角度だけ隠す(位置は動かさない)
   // v595: 照合番号・注記・溶接記号の指示線どうしが交差しているときは、2つの置き場所を入れ替えて交差をなくす
   // (左の記号が右の点を、右の記号が左の点を指すような、たすき掛けの指し方をしない)。入れ替えると別の交差や
@@ -26161,6 +26294,8 @@ pmi._lineFarPoint = null;
       try { weldFinalLeaderCheck(allScreenPmis, mvp); } catch (err) { console.warn('溶接記号の指示線の最終確認に失敗しました', err); }
       // v543: 照合番号などの注記が、寸法線・寸法補助線・寸法値に重なったまま残らないよう、最終位置で確かめてずらす
       try { noteFinalDimCheck(allScreenPmis, mvp); } catch (err) { console.warn('注記と寸法の重なりの最終確認に失敗しました', err); }
+      // v630: 近くの照合番号どうしの縦・横の位置をそろえる(通常表示のみ。指示線の長さの上限は守る)
+      if (!showAllAtOnce) { try { alignNotesTidy(allScreenPmis, mvp); } catch (err) { console.warn('注記の位置合わせに失敗しました', err); } }
       if (showAllAtOnce) { try { perimeterMatchLayout(allScreenPmis, mvp); } catch (err) { console.warn('外周への整列に失敗しました', err); } } // v608
       else { try { leaderCrossSwap(allScreenPmis, mvp); } catch (err) { console.warn('指示線の交差の入れ替えに失敗しました', err); } } // v595
       // v527: 注記・溶接記号の置き場所の変化をなめらかに(目標位置へ少しずつ近づける)
