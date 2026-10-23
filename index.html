@@ -1171,7 +1171,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v627</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v628</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1319,6 +1319,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v628: 回転を止めてからワンテンポ遅れてモデルが回ったり、PMIが表示されたりする問題を改善しました。(1) 照合番号・溶接記号の置き場所の割り当てに、ハンガリアン法(割り当て問題の解法)を使うようにしました。1件ずつのコストの合計が最小になる割り当てを先に求め、指示線の交差や重なりが減る入れ替えで仕上げてから、時間の許す範囲で総当たりで確かめます。(2) 回転を止めたと判定するまでの待ち時間を180msから120msに短くしました。描画に時間がかかる端末では、回している途中に「止めた」と誤って判定しないよう、待ち時間を1コマの間隔に合わせてのばします。(3) 止めたあとの置き場所の計算が3コマ続けて同じ結果になったら、計算し直しを早めに終えるようにしました。(4) 描画(GPU)が追いつかない端末では、回している間だけ描画の解像度を下げ、止めた瞬間に元に戻します。</li>
         <li>v627: 「PMIを一斉表示」で出ていなかったPMIが出るようにしました。(1) 直径の寸法を真横から見る向きでも、一斉表示では出すようにしました。(2) 置き場所が無いとして出していなかった照合番号・注記・溶接記号は、ほかの番号・記号もいっしょに置き直して、重ならず指示線どうしも交差しない並べ方を探すようにしました。(3) 指している継ぎ目のまわりを部品が囲んでいる所は、指している点から外へ出るまでの1区間だけ指示線がモデルの上を通ってよいことにし、溶接記号は置き場所ごとに見えている継ぎ目の点を選び直します。(4) それでも置けないものは、指示線を1回折り曲げて(JIS Z 8322)すき間を通します。指示線がほかの部品を貫通する・指示線どうしが交差する・記号どうしが重なる表示はこれまでどおり出しません。PMIがとても込み合った向きでは、まだ出せないものが残ることがあります(拡大すると出ます)。</li>
         <li>v626: 溶接記号がモデルを貫通して(モデルの上に重なって)表示されることがあった問題を直しました。これまで溶接記号は、枠の2割までならモデルに重なってもよいことにしていましたが、少しでも重なる置き場所は使わないようにしました。置き場所を選び直すときは、ほかの番号・記号の指示線と交差しない所を選びます(指示線どうしの交差は不可のまま)。モデルにも重ならず、ほかの指示線とも交差しない置き場所がどうしても無い向きでは、その溶接記号(と継ぎ目の強調)は出さず、向きを変えると出ます。</li>
         <li>v625: 照合番号(バルーン)や指示線が寸法補助線にかぶって表示されることがあった問題を直しました。これまで調べていなかった寸法(寸法値を出さず線だけ描いている寸法)の線も調べ、指示線が寸法補助線・寸法線に沿って重なるときも、その角度だけ寸法の方を出さないようにしました。一斉表示のとき(寸法はすべて出します)は、指示線が寸法線・寸法補助線に沿わない置き場所を選び、それでも指示線が沿って重なる番号・記号や、番号の丸が寸法補助線にかかる番号・記号は、その角度では出さないようにしました。</li>
@@ -8615,13 +8616,21 @@
   }, { passive: true, capture: true }));
   // v531: 視点を動かしている最中かどうか。指・マウスを離した瞬間、または動きが
   // VIEW_STILL_MS 止まった瞬間に「止めた」とみなす(照合番号・溶接記号はその瞬間に置き直す)
-  const VIEW_STILL_MS = 180;
+  const VIEW_STILL_MS = 120; // v628: 180→120ms(止めてから置き直すまでの待ち時間を短く)
   let lastUserViewReleaseAt = -1e9, pmiViewWasMoving = false;
   ['pointerup', 'pointercancel', 'touchend', 'touchcancel'].forEach((ev) => window.addEventListener(ev, () => {
     lastUserViewReleaseAt = performance.now();
   }, { passive: true, capture: true }));
+  // v628: 1コマの描画に時間がかかる端末では、マウスの動きもコマごとにまとめて届くため、動かしている最中でも
+  // 入力の間隔が VIEW_STILL_MS を超えて「止めた」と誤って判定され、回している途中で重い置き直しの計算が
+  // 走って、さらに回転が遅れていた。止めたと判定する待ち時間を、最近のコマの間隔の2.5倍以上にする(最大0.6秒)。
+  function viewStillMs() {
+    let g = 16;
+    try { g = pmiFrameGapMs; } catch (e) { g = 16; }
+    return Math.max(VIEW_STILL_MS, Math.min(600, (g || 16) * 2.5));
+  }
   function isUserViewMoving(now) {
-    return now - lastUserViewInputAt < VIEW_STILL_MS && lastUserViewInputAt > lastUserViewReleaseAt;
+    return now - lastUserViewInputAt < viewStillMs() && lastUserViewInputAt > lastUserViewReleaseAt;
   }
   let lastDeclutterStateKey = null; // v177: 重なり回避の再計算スロットル用(render()参照)
   // v577: 「PMIを一斉表示」中は、視点が止まってから 置き場所の計算結果が落ち着くまで(最大 SHOWALL_LOCK_MAX_MS)計算し、その後は
@@ -19107,9 +19116,23 @@ pmi._lineFarPoint = null;
     }
   }
 
+  // v628: 「回転を止めてからワンテンポ遅れて回る」との指摘への対応。描画(GPU)が追いつかない端末では、
+  // 描き終わるのを待つ間に操作が溜まり、手を止めた後もモデルが遅れて回り続けて見える。
+  // 回している間だけ、描画が原因で1コマの間隔が長い(MOVE_LOWRES_GAP_MS より遅い)ときは描画の解像度を下げて軽くし、
+  // 止めた瞬間に元の解像度へ戻す(止まっている間の見た目は変わらない)。速い端末では何も変わらない。
+  const MOVE_LOWRES_GAP_MS = 22;
+  let moveLowRes = false, moveSlowFrames = 0, lastRenderJsMs = 0;
+  function updateMoveLowRes() {
+    const moving = isUserViewMoving(performance.now()) && pointers.size > 0;
+    if (!moving) { moveLowRes = false; moveSlowFrames = 0; return; }
+    // 計算(JavaScript)ではなく描画(GPU)に時間がかかっているコマだけを数える(計算が重いだけなら解像度を下げても速くならない)
+    if (pmiSmoothDt > MOVE_LOWRES_GAP_MS && pmiSmoothDt - lastRenderJsMs > 14) moveSlowFrames++; else moveSlowFrames = Math.max(0, moveSlowFrames - 1);
+    if (moveSlowFrames >= 4) moveLowRes = true;
+  }
   function resizeCanvasToDisplaySize() {
     updateRibbonHeightVar();
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    let dpr = Math.min(window.devicePixelRatio || 1, 2);
+    if (moveLowRes) dpr = Math.max(0.6, dpr * (pmiFrameGapMs > 40 ? 0.5 : 0.7)); // v628
     const w = Math.round(canvas.clientWidth * dpr);
     const h = Math.round(canvas.clientHeight * dpr);
     if (canvas.width !== w || canvas.height !== h) {
@@ -19189,8 +19212,49 @@ pmi._lineFarPoint = null;
   const RADIAL_MODEL_SAMPLE_MAX = 3000;      // v377: モデル範囲の計算に使う頂点数の上限
   const RADIAL_LEADER_DEFAULT_PX = 110;      // v377: 寸法が無い場合の指示線の長さの上限
   const RADIAL_LEADER_MIN_PX = 80, RADIAL_LEADER_MAX_PX = 240; // v377: 上限値そのものの範囲
-  const RADIAL_KEEP_BONUS = 300;             // v433: 前回と同じ方向を使い続ける割り当てへの優遇(入れ替わりのちらつき防止)
+  const RADIAL_KEEP_BONUS = 300;
+  const RADIAL_DFS_BUDGET_MS = 4;            // v628: 総当たりで探す時間の上限(超えたらハンガリアン法の結果を使う)
+  // v628: ハンガリアン法(割り当て問題)。cost[i][j] は i番目(行)を j番目の置き場所(列)に割り当てるコスト。
+  // 行の数 n ≤ 列の数 m のとき、各行に別々の列を1つずつ割り当て、コストの合計が最小になる割り当てを返す
+  // (返り値: 行ごとの列番号の配列)。計算量は O(n²m)。ポテンシャル(u, v)を使う標準的な実装。
+  function hungarianAssign(cost, n, m) {
+    if (!(n > 0) || n > m) return null;
+    const INF = 1e18, u = new Float64Array(n + 1), v = new Float64Array(m + 1), p = new Int32Array(m + 1), way = new Int32Array(m + 1);
+    const minv = new Float64Array(m + 1), used = new Uint8Array(m + 1);
+    for (let i = 1; i <= n; i++) {
+      p[0] = i; let j0 = 0;
+      minv.fill(INF); used.fill(0);
+      do {
+        used[j0] = 1;
+        const i0 = p[j0]; let delta = INF, j1 = 0;
+        for (let j = 1; j <= m; j++) {
+          if (used[j]) continue;
+          const cur = cost[i0 - 1][j - 1] - u[i0] - v[j];
+          if (cur < minv[j]) { minv[j] = cur; way[j] = j0; }
+          if (minv[j] < delta) { delta = minv[j]; j1 = j; }
+        }
+        if (!(delta < INF)) return null;
+        for (let j = 0; j <= m; j++) {
+          if (used[j]) { u[p[j]] += delta; v[j] -= delta; } else minv[j] -= delta;
+        }
+        j0 = j1;
+      } while (p[j0] !== 0);
+      do { const j1 = way[j0]; p[j0] = p[j1]; j0 = j1; } while (j0);
+    }
+    const as = new Int32Array(n).fill(-1);
+    for (let j = 1; j <= m; j++) if (p[j] > 0) as[p[j] - 1] = j - 1;
+    return as;
+  }
+             // v433: 前回と同じ方向を使い続ける割り当てへの優遇(入れ替わりのちらつき防止)
+  // v628: 同じコマの中で何度も測り直さない(画面の配置の読み取り getBoundingClientRect は重いため)。
+  // 記号の中での位置関係だけを返すので、同じコマで記号を動かしても結果は変わらない。
   function measureTagCenterOffset(pmi) {
+    if (pmi._mtcF === pmiSmoothFrame && pmi._mtc && pmi._mtcW === pmi._tagW && pmi._mtcH === pmi._tagH && pmi._mtcS === pmi._weldShiftY) return { ...pmi._mtc };
+    const r = measureTagCenterOffsetRaw(pmi);
+    pmi._mtc = { ...r }; pmi._mtcF = pmiSmoothFrame; pmi._mtcW = pmi._tagW; pmi._mtcH = pmi._tagH; pmi._mtcS = pmi._weldShiftY;
+    return r;
+  }
+  function measureTagCenterOffsetRaw(pmi) {
     const fw = pmi._tagW || 40, fh = pmi._tagH || 24;
     const fallback = { w: fw, h: fh, offX: fw / 2, offY: 0 };
     const el = markerEls.get(pmi.id);
@@ -19439,16 +19503,53 @@ pmi._lineFarPoint = null;
     for (let idx = n - 1; idx >= 0; idx--) restMin[idx] = restMin[idx + 1] + Math.min(...items[order[idx]].single);
     let best = Infinity, bestAssign = null;
     const assign = new Array(n).fill(-1), used = new Array(8).fill(false);
-    // 前回の割り当て(まだ有効なら)を最初の上限値にして枝刈りを効かせる
+    // v628: ハンガリアン法で「1件ずつのコスト(single)の合計が最小になる割り当て」を先に求め、
+    // 2件どうしのコスト(交差・重なり pc)を足した合計が下がる「入れ替え」「空いた方向への移動」を繰り返して仕上げる。
+    // その結果を上限値にして、時間の許す範囲(RADIAL_DFS_BUDGET_MS)で総当たり(分枝限定)を行い、もっと良い割り当てがあれば使う。
+    // 以前は総当たりだけで探していたため、件数が多いと回転を止めた直後の計算に時間がかかり、PMIの表示が遅れていた。
+    const totalOf = (as) => {
+      let c = 0;
+      for (let i = 0; i < n; i++) c += items[i].single[as[i]];
+      for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) c += pc[pcIdx(i, as[i], j, as[j])];
+      return c;
+    };
+    {
+      const hs = hungarianAssign(items.map((it) => it.single), n, 8);
+      if (hs) {
+        const as = Array.from(hs);
+        let cur = totalOf(as);
+        for (let pass = 0; pass < 12; pass++) {
+          let improved = false;
+          for (let i = 0; i < n; i++) {
+            const used8 = new Array(8).fill(-1);
+            for (let q = 0; q < n; q++) used8[as[q]] = q;
+            for (let k = 0; k < 8; k++) {
+              if (k === as[i]) continue;
+              const j = used8[k], ki = as[i];
+              as[i] = k; if (j >= 0) as[j] = ki;
+              const c = totalOf(as);
+              if (c < cur - 1e-9) { cur = c; improved = true; used8[k] = i; used8[ki] = j; }
+              else { as[i] = ki; if (j >= 0) as[j] = k; }
+            }
+          }
+          if (!improved) break;
+        }
+        if (cur < best) { best = cur; bestAssign = as.slice(); }
+      }
+    }
+    // 前回の割り当て(まだ有効なら)も上限値の候補にする(同じくらい良いなら前回のままにして、ちらつきを防ぐ)
     {
       let ok = true, c = 0; const seen = new Set();
       for (let i = 0; i < n && ok; i++) { const k = items[i].pmi._radialPrevDir; if (k == null || k < 0 || seen.has(k)) ok = false; else { seen.add(k); c += items[i].single[k]; } }
       if (ok) {
         for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) c += pc[pcIdx(i, items[i].pmi._radialPrevDir, j, items[j].pmi._radialPrevDir)];
-        best = c + 1e-9; bestAssign = items.map((it) => it.pmi._radialPrevDir);
+        if (c <= best + 1e-6) { best = c + 1e-9; bestAssign = items.map((it) => it.pmi._radialPrevDir); }
       }
     }
+    const dfsEnd = performance.now() + RADIAL_DFS_BUDGET_MS;
+    let dfsSteps = 0;
     (function dfs(idx, cost) {
+      if ((++dfsSteps & 255) === 0 && performance.now() > dfsEnd) return; // v628: 時間切れなら、ハンガリアン法で求めた割り当てを使う
       if (cost + restMin[idx] >= best) return;
       if (idx === n) { best = cost; bestAssign = assign.slice(); return; }
       const i = order[idx];
@@ -24113,7 +24214,8 @@ pmi._lineFarPoint = null;
       if (gap > 0 && gap < 1500) pmiFrameGapMs = pmiFrameGapMs * 0.7 + gap * 0.3; } // v624
     // v511: 描画中だけcanvasの大きさを使い回す(cvSize()参照)
     _cvCache = null; _cvCacheOn = true;
-    try { renderFrame(); } finally { _cvCacheOn = false; _cvCache = null; }
+    const rjT0 = performance.now();
+    try { renderFrame(); } finally { _cvCacheOn = false; _cvCache = null; lastRenderJsMs = performance.now() - rjT0; }
   }
   function renderFrame() {
     restorePmiGhosts();
@@ -24451,6 +24553,7 @@ pmi._lineFarPoint = null;
       }
     }
     if (gl) {
+      try { updateMoveLowRes(); } catch (e) { moveLowRes = false; }
       resizeCanvasToDisplaySize();
       gl.viewport(0, 0, canvas.width, canvas.height);
       if (!viewportBgRgb) { // v511: 背景色は固定なので最初の1回だけ読む
@@ -24639,7 +24742,7 @@ pmi._lineFarPoint = null;
         const shownW = pmiList.filter((p) => p.category === 'weld' && p._modelAttachmentPoint && p._weldSeamShown && isCategoryVisible(p));
         if (shownW.length) {
           const px = 2 / Math.max(1, canvas.width), py = 2 / Math.max(1, canvas.height);
-          const dpr = window.devicePixelRatio || 1;
+          const dpr = canvas.width / Math.max(1, canvas.clientWidth); // v628: 回転中に解像度を下げたときも同じ太さにする
           const disc = (r) => { const o = []; const R = Math.ceil(r); for (let dx = -R; dx <= R; dx++) for (let dy = -R; dy <= R; dy++) if (dx * dx + dy * dy <= r * r + 0.01) o.push([dx, dy]); return o; };
           // v553: 継ぎ目の線を太く(手前: 約5px、選んだもの: 約7px、陰: 約3px)して見つけやすくする
           const HALO_N = disc(3.2), CORE_N = disc(2.4), HALO_S = disc(4.2), CORE_S = disc(3.4), HIDDEN_N = disc(1.4);
@@ -25510,6 +25613,12 @@ pmi._lineFarPoint = null;
         ((showAllAge >= SHOWALL_LOCK_MIN_MS && showAllStableCount >= 6) || showAllAge >= SHOWALL_LOCK_MAX_MS) &&
         allScreenPmis.every((p) => (p.category !== 'note' && p.category !== 'weld') || p.asRecorded || p._declutterDX != null);
       if (showAllLocked) { declutterSettleUntil = 0; noteHoverFreeze = null; }
+      // v628: 回転を止めたあとの「落ち着くまで毎コマ計算し直す」間(DECLUTTER_SETTLE_MS)に、置き場所の計算結果が
+      // 3コマ続けて同じになったら、もう落ち着いたとみなして計算し直しを終える。以前は結果が同じでも
+      // 決まった時間のあいだ重い計算を毎コマ続けていたため、止めた直後に画面の動きが重くなり、
+      // すぐに回し始めるとワンテンポ遅れて回っていた。
+      if (!showAllAtOnce && declutterSettleUntil > nowMs && declutterStateKey === lastDeclutterStateKey && !isUserViewMoving(nowMs) &&
+          showAllStableCount >= 2 && !pmiSmoothMoving) declutterSettleUntil = 0;
       const useDeclutterCache = showAllLocked || (declutterStateKey === lastDeclutterStateKey && nowMs >= declutterSettleUntil);
       if (useDeclutterCache) {
         for (const pmi of allScreenPmis) {
