@@ -1171,7 +1171,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v636</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v637</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1319,6 +1319,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v637: 動きが重い原因を調べ、使われない計算をやめました。(1) 回している間に新しく出てきた番号・記号の置き場所の計算と、番号・記号を寸法値と重ならない位置へずらす計算は、止めた瞬間にすべて計算し直して捨てられるため、回している間は行わないようにしました。(2) 回している間はリボンの高さを測り直さないようにしました(測るたびに画面の配置の計算が走るため)。(3) 使っている端末で重さを確かめられるよう、URLの末尾に ?perf=1 を付けるか Shift+P で、1コマの間隔と計算時間を画面左下に表示する「計測」表示を加えました。</li>
         <li>v636: 照合番号などを行・列(四角形)にそろえる処理(v630)を、いったんやめました。代わりに通常表示の最後に、表示中の照合番号・注記・溶接記号について、記号どうしの重なり、記号と寸法値の重なり、指示線がほかの記号・寸法値にかかること、指示線どうしの交差が残っていないかを調べ、残っているものは指している点のまわりのかぶらない所(モデルにも重ならず、指示線がほかの部品の上を通らない所)へ移すようにしました。移せる所が無いものは、その向きでは表示しません(かぶったままは出しません)。指示線が寸法線・寸法補助線を横切るのはよいことにしています。</li>
         <li>v635: PMIの表示が遅く感じられる問題を直しました。(1) 寸法値の置き場所の変化を、ばねでゆっくり近づける動き(約0.3秒)をやめ、すぐに置くようにしました(回転中に寸法値がモデルに遅れてついてくる・止めた後にゆっくり移るのを防ぐ)。(2) 描くのが遅い端末で、回転を止めたと判定するまでの待ち時間が最大0.6秒までのびていたのを、最大0.15秒にしました。</li>
         <li>v634: 「PMIを一斉表示」の、番号・記号の重なりを解く探索を、v633で短くした時間の上限を元に戻したうえで速くしました。(1) 置き場所の良し悪しの計算を、重い判定ほど後に回し、ほかの候補より悪いと分かった時点で打ち切るようにしました(選ばれる結果は同じ)。(2) 計算結果の覚え方を数値の鍵に変え、枠の計算も使い回すようにしました。(3) 探索の各段階を小さな関数に分け、ブラウザが高速化できるようにしました。(4) 指示線を折り曲げて置く探索は、置けたものから先に表示し、残りは画面を止めずに合間に続けて、見つかった時点で表示します。(5) 描くのが遅い端末で、回している間の仮の配置のまま確定して番号が出ないことがあったのを直しました。こちらの測定では、止めた後に画面が止まる時間が約0.6〜0.8秒(v633)から約0.4〜0.57秒になり、探索に使える時間は約4倍(以前の上限)に戻りました。</li>
@@ -9641,6 +9642,8 @@
   let ribbonHCache = 0, ribbonHCacheF = -1;
   function getRibbonHeightPx() {
     if (_cvCacheOn && ribbonHCacheF === pmiSmoothFrame) return ribbonHCache;
+    // v637: 回している間はリボンの高さは変わらないので測り直さない(測るたびに画面の配置の計算が走るため)
+    if (ribbonHCacheF >= 0 && isUserViewMoving(performance.now())) { ribbonHCacheF = pmiSmoothFrame; return ribbonHCache; }
     const v = getRibbonHeightPx0();
     if (_cvCacheOn) { ribbonHCache = v; ribbonHCacheF = pmiSmoothFrame; }
     return v;
@@ -19292,6 +19295,9 @@ pmi._lineFarPoint = null;
     // 以前は1つでも新しいものがあると全部を計算し直していたため、回している間のコマが重くなっていた。
     let heldDirs = null;
     const radialMovingNow = isUserViewMoving(performance.now());
+    // v637: 回している間は計算しない(回している間は置き場所を保つだけで、止めた瞬間にすべて置き直すため、
+    // ここで新しく出てきたものの置き場所を計算しても、止めたときに捨てられる)
+    if (radialMovingNow) return;
     { const nowR = performance.now();
       if (radialMovingNow) {
         const held = targets.filter((p) => p._anchorScreen && pmiHeldWhileMoving(p, nowR, true));
@@ -23746,6 +23752,7 @@ pmi._lineFarPoint = null;
     return { left: cx - hw, right: cx + hw, top: cy - hh, bottom: cy + hh };
   }
   function resolveTagOverlapsWithDimensionText(allScreenPmis, mvp) {
+    if (isUserViewMoving(performance.now())) return; // v637: 回している間は計算しない(置き場所は保つだけで、止めたら置き直す)
     const cr = cvRect();
     const cw = cvSize().w, ch = cvSize().h;
     const M = DIM_TEXT_CLEAR_MARGIN_PX;
@@ -24677,13 +24684,45 @@ pmi._lineFarPoint = null;
     st.ax = x; st.ay = y; st.t = now; st.f = pmiSmoothFrame;
     return { x, y };
   }
+  // v637: 動作の重さを、使っている端末でそのまま確かめられる「計測」表示。URLの末尾に ?perf=1 を付けて開くか、
+  // キーボードで Shift+P を押すと、画面左下に、1コマの間隔(何コマ/秒か)と、そのうち計算(JavaScript)にかかった時間、
+  // それ以外(画面の配置・描画など)にかかった時間を、直近60コマの平均と最大で表示する。
+  let perfOverlayOn = /[?&]perf=1/.test(location.search);
+  const perfBuf = [];
+  let perfLastT = 0, perfEl = null, perfLastShow = 0;
+  function perfRecord(t0, js) {
+    const gap = perfLastT ? t0 - perfLastT : 0;
+    perfLastT = t0;
+    if (gap > 0 && gap < 2000 && js > 0.05) { perfBuf.push([gap, js, isUserViewMoving(t0) ? 1 : 0]); if (perfBuf.length > 60) perfBuf.shift(); }
+    if (t0 - perfLastShow < 250) return;
+    perfLastShow = t0;
+    if (!perfEl) {
+      perfEl = document.createElement('div');
+      perfEl.style.cssText = 'position:fixed;left:8px;bottom:26px;z-index:100001;background:rgba(0,0,0,0.72);color:#fff;font:12px/1.5 monospace;padding:6px 8px;border-radius:6px;pointer-events:none;white-space:pre';
+      document.body.appendChild(perfEl);
+    }
+    perfEl.hidden = false;
+    if (!perfBuf.length) { perfEl.textContent = '計測中…'; return; }
+    const avg = (k) => perfBuf.reduce((a, r) => a + r[k], 0) / perfBuf.length, mx = (k) => Math.max(...perfBuf.map((r) => r[k]));
+    const g = avg(0), j = avg(1);
+    perfEl.textContent = '1コマの間隔  平均 ' + g.toFixed(1) + 'ms (' + (1000 / g).toFixed(0) + 'コマ/秒)  最大 ' + mx(0).toFixed(0) + 'ms\n' +
+      '計算(JS)     平均 ' + j.toFixed(1) + 'ms  最大 ' + mx(1).toFixed(0) + 'ms\n' +
+      'それ以外     平均 ' + Math.max(0, g - j).toFixed(1) + 'ms (画面の配置・描画・待ち)';
+  }
+  window.addEventListener('keydown', (e) => {
+    if (e.shiftKey && (e.key === 'P' || e.key === 'p') && !/^(INPUT|TEXTAREA|SELECT)$/.test((e.target && e.target.tagName) || '')) {
+      perfOverlayOn = !perfOverlayOn; perfBuf.length = 0; perfLastT = 0;
+      if (!perfOverlayOn && perfEl) perfEl.hidden = true;
+      markRenderActive(2000);
+    }
+  });
   function render() {
     { const t = performance.now(); const gap = t - (pmiSmoothLastT || t - 16); pmiSmoothDt = Math.min(50, Math.max(1, gap)); pmiSmoothLastT = t; pmiSmoothFrame++; pmiSmoothMoving = false;
       if (gap > 0 && gap < 1500) pmiFrameGapMs = pmiFrameGapMs * 0.7 + gap * 0.3; } // v624
     // v511: 描画中だけcanvasの大きさを使い回す(cvSize()参照)
     _cvCache = null; _cvCacheOn = true;
     const rjT0 = performance.now();
-    try { renderFrame(); } finally { _cvCacheOn = false; _cvCache = null; lastRenderJsMs = performance.now() - rjT0; }
+    try { renderFrame(); } finally { _cvCacheOn = false; _cvCache = null; lastRenderJsMs = performance.now() - rjT0; if (perfOverlayOn) perfRecord(rjT0, lastRenderJsMs); }
   }
   function renderFrame() {
     restorePmiGhosts();
