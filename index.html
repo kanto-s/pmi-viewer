@@ -1171,7 +1171,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v635</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v636</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1319,6 +1319,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v636: 照合番号などを行・列(四角形)にそろえる処理(v630)を、いったんやめました。代わりに通常表示の最後に、表示中の照合番号・注記・溶接記号について、記号どうしの重なり、記号と寸法値の重なり、指示線がほかの記号・寸法値にかかること、指示線どうしの交差が残っていないかを調べ、残っているものは指している点のまわりのかぶらない所(モデルにも重ならず、指示線がほかの部品の上を通らない所)へ移すようにしました。移せる所が無いものは、その向きでは表示しません(かぶったままは出しません)。指示線が寸法線・寸法補助線を横切るのはよいことにしています。</li>
         <li>v635: PMIの表示が遅く感じられる問題を直しました。(1) 寸法値の置き場所の変化を、ばねでゆっくり近づける動き(約0.3秒)をやめ、すぐに置くようにしました(回転中に寸法値がモデルに遅れてついてくる・止めた後にゆっくり移るのを防ぐ)。(2) 描くのが遅い端末で、回転を止めたと判定するまでの待ち時間が最大0.6秒までのびていたのを、最大0.15秒にしました。</li>
         <li>v634: 「PMIを一斉表示」の、番号・記号の重なりを解く探索を、v633で短くした時間の上限を元に戻したうえで速くしました。(1) 置き場所の良し悪しの計算を、重い判定ほど後に回し、ほかの候補より悪いと分かった時点で打ち切るようにしました(選ばれる結果は同じ)。(2) 計算結果の覚え方を数値の鍵に変え、枠の計算も使い回すようにしました。(3) 探索の各段階を小さな関数に分け、ブラウザが高速化できるようにしました。(4) 指示線を折り曲げて置く探索は、置けたものから先に表示し、残りは画面を止めずに合間に続けて、見つかった時点で表示します。(5) 描くのが遅い端末で、回している間の仮の配置のまま確定して番号が出ないことがあったのを直しました。こちらの測定では、止めた後に画面が止まる時間が約0.6〜0.8秒(v633)から約0.4〜0.57秒になり、探索に使える時間は約4倍(以前の上限)に戻りました。</li>
         <li>v633: 「PMIを一斉表示」のときの回転と置き場所の計算を速くしました。(1) モデルを画面の升目に塗る処理を、大きな関数から切り出し(ブラウザが高速化できるように)、行ごとに範囲を求める方式にしました(1秒以上→数十ms)。(2) 置き場所の良し悪しの計算結果を使い回すようにしました。(3) 一斉表示ではあとで全部置き直すので、その前の重ならない位置探しを省きました。(4) 置き場所探しの時間の上限を短くしました。(5) 回している間は、寸法補助線をモデルの外形で切る位置を止まっていたときのまま使い、リボンの高さも1コマに1回だけ測るようにしました。こちらの測定では、止めた後の置き直しが約1.5〜3.4秒から約0.6〜0.8秒に、回転中の1コマが約50〜70msから約26msになりました。</li>
@@ -20937,6 +20938,131 @@ pmi._lineFarPoint = null;
     }
     return moved;
   }
+  // v636: 「指示線や指示どうしが一切かぶらないようにしてほしい」との要望。通常表示の最後に、表示中の照合番号・
+  // 注記・溶接記号について、次のどれかが残っていないかを調べる。
+  //   ・記号(枠)どうしの重なり / 記号と寸法値の重なり
+  //   ・指示線がほかの記号(枠)・寸法値にかかる / 指示線どうしの交差・接触
+  // 残っているものは、指している点のまわりで、どれともかぶらず、モデルにも重ならず、指示線がほかの部品の上を
+  // 通らない置き場所へ移す(指示線の短い所から探す)。移せる所が無いものは、この向きでは表示しない
+  // (かぶったままは出さない)。指示線が寸法線・寸法補助線を横切るのはよいことにする(一斉表示と同じ)。
+  const OVG_MARGIN_PX = 3;
+  function overlapFreeGuard(allScreenPmis, mvp) {
+    if (showAllAtOnce || isUserViewMoving(performance.now())) return;
+    const t0 = performance.now();
+    const cw = cvSize().w, ch = cvSize().h, cr = cvRect();
+    const cover = getScreenCover(mvp);
+    // 前のコマでこの処理が隠したものは、いったん戻して調べ直す
+    for (const p of allScreenPmis) {
+      if (!p._ovgHidden) continue;
+      p._ovgHidden = false;
+      const el = markerEls.get(p.id);
+      if (el && !p._leaderCrossHidden) el.style.visibility = '';
+    }
+    const items = [];
+    for (const p of allScreenPmis) {
+      if (!(p.category === 'note' || p.category === 'weld') || p.asRecorded || !p._screen || p._noModelLeader) continue;
+      const el = markerEls.get(p.id);
+      if (!el || el.style.display === 'none' || el.style.visibility === 'hidden' || el.style.opacity === '0') continue;
+      const g = measureTagCenterOffset(p);
+      if (!g || !(g.w > 0)) continue;
+      const oL = leaderModelPoint(p);
+      const O = oL ? project(mvp, oL) : null;
+      if (!O) continue;
+      const it = { p, g, O, el, round: p.category === 'note' && (p.noteShape === 'circle' || isRoundNoteOutline(p)), ko: p.category === 'weld' ? weldKneeOffset(p) : null };
+      it.C = { x: p._screen.x + g.offX, y: p._screen.y + g.offY };
+      items.push(it);
+    }
+    if (!items.length) return;
+    const rectOf = (it, C) => ({ x0: C.x - it.g.w / 2, x1: C.x + it.g.w / 2, y0: C.y - it.g.h / 2, y1: C.y + it.g.h / 2 });
+    const startOf = (it, C, R) => {
+      if (it.ko) { try { return weldKneeFor(C, R, it.O, it.ko).K; } catch (e) { /* 下の方法で */ } }
+      const dx = it.O.x - C.x, dy = it.O.y - C.y, d = Math.hypot(dx, dy) || 1;
+      if (it.round) { const rad = Math.max(it.g.w, it.g.h) / 2; return { x: C.x + dx / d * Math.min(rad, d), y: C.y + dy / d * Math.min(rad, d) }; }
+      const tx = Math.abs(dx) > 1e-6 ? it.g.w / 2 / Math.abs(dx) : Infinity, ty = Math.abs(dy) > 1e-6 ? it.g.h / 2 / Math.abs(dy) : Infinity;
+      const t = Math.min(1, tx, ty);
+      return { x: C.x + dx * t, y: C.y + dy * t };
+    };
+    const shapeOf = (it) => { if (it._sc !== it.C) { it._sc = it.C; it.R = rectOf(it, it.C); it.S = startOf(it, it.C, it.R); } return it; };
+    // 寸法値(文字)の範囲
+    const dimRects = [];
+    for (const q of allScreenPmis) {
+      if (q.category !== 'dimension' || q._dimWholeHidden || q._dimThinHidden || q._dimNoteHide) continue;
+      const el = markerEls.get(q.id);
+      if (!el || el.style.display === 'none' || el.style.visibility === 'hidden') continue;
+      const r = q._dimFinalRect;
+      if (r) dimRects.push({ x0: r.left - cr.left, x1: r.right - cr.left, y0: r.top - cr.top, y1: r.bottom - cr.top });
+    }
+    const banned = [];
+    { const d = getPartsTableDockRect(); if (d) banned.push(d); }
+    { const b = getBomDrawerRect(); if (b) banned.push(b); }
+    const topLim = Math.max(4, getRibbonHeightPx() - cr.top + 4);
+    const ov = (a, b, m) => a.x0 - m < b.x1 && b.x0 - m < a.x1 && a.y0 - m < b.y1 && b.y0 - m < a.y1;
+    const M = OVG_MARGIN_PX;
+    // 2つのPMIがかぶっているか(どちらかを候補の位置 C に置いたとき)
+    const pairConflict = (A, RA, SA, B) => {
+      shapeOf(B);
+      if (ov(RA, B.R, M)) return true;
+      if (segTouchesRect(SA, A.O, B.R, M) || segTouchesRect(B.S, B.O, RA, M)) return true;
+      if (segCrossesSeg(SA, A.O, B.S, B.O) || segCrossesSeg(B.S, B.O, SA, A.O)) return true;
+      return false;
+    };
+    const selfConflict = (A, RA, SA) => dimRects.some((d) => ov(RA, d, M) || segTouchesRect(SA, A.O, d, M));
+    const conflictsOf = (A, list) => {
+      shapeOf(A);
+      let n = selfConflict(A, A.R, A.S) ? 1 : 0;
+      for (const B of list) if (B !== A && !B.hidden && pairConflict(A, A.R, A.S, B)) n++;
+      return n;
+    };
+    const onModel = (R) => {
+      if (!cover) return false;
+      for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) if (cover.at(R.x0 + (R.x1 - R.x0) * (i + 0.5) / 4, R.y0 + (R.y1 - R.y0) * (j + 0.5) / 4)) return true;
+      return false;
+    };
+    const okAt = (A, C) => {
+      const R = rectOf(A, C);
+      if (R.x0 < 4 || R.x1 > cw - 4 || R.y0 < topLim || R.y1 > ch - 4) return false;
+      if (banned.some((b) => ov(R, b, 4))) return false;
+      const S = startOf(A, C, R);
+      if (Math.hypot(S.x - A.O.x, S.y - A.O.y) < 6) return false;
+      if (selfConflict(A, R, S)) return false;
+      for (const B of items) if (B !== A && !B.hidden && pairConflict(A, R, S, B)) return false;
+      if (onModel(R)) return false;
+      if (cover && A.p.category === 'note' && noteLeaderOtherFrac(cover, S, A.O, A.p) > 0) return false;
+      if (cover && A.p.category === 'weld' && cover.segFrac && cover.segFrac(S, A.O, 7) > 0) return false;
+      return true;
+    };
+    // かぶりの多いものから直す
+    for (let round = 0; round < 3; round++) {
+      const bad = items.filter((A) => !A.hidden && conflictsOf(A, items) > 0)
+        .sort((a, b) => conflictsOf(b, items) - conflictsOf(a, items));
+      if (!bad.length) break;
+      for (const A of bad) {
+        if (A.hidden || conflictsOf(A, items) === 0) continue;
+        let found = null;
+        if (performance.now() - t0 < 40) {
+          for (let r = 14; r <= 140 && !found; r += 10) {
+            for (let k = 0; k < 24; k++) {
+              const an = (k / 24) * Math.PI * 2, ux = Math.cos(an), uy = Math.sin(an);
+              const ext = Math.min(Math.abs(ux) > 1e-6 ? A.g.w / 2 / Math.abs(ux) : Infinity, Math.abs(uy) > 1e-6 ? A.g.h / 2 / Math.abs(uy) : Infinity);
+              const C = { x: A.O.x + ux * (r + ext), y: A.O.y + uy * (r + ext) };
+              if (okAt(A, C)) { found = C; break; }
+            }
+          }
+        }
+        if (found) {
+          A.C = found;
+          const p = A.p;
+          p._screen.x = found.x - A.g.offX; p._screen.y = found.y - A.g.offY;
+          if (p._anchorScreen) { p._noteRelDX = p._screen.x - p._anchorScreen.x; p._noteRelDY = p._screen.y - p._anchorScreen.y; p._notePend = null; }
+        } else if (round === 2 || performance.now() - t0 >= 40) {
+          // 置ける所が無い: この向きでは表示しない
+          A.hidden = true;
+          A.p._ovgHidden = true;
+          A.el.style.visibility = 'hidden';
+        }
+      }
+    }
+  }
   // v566: 表示中の照合番号(注記)と重なっている寸法を、その角度だけ隠す(位置は動かさない)
   // v595: 照合番号・注記・溶接記号の指示線どうしが交差しているときは、2つの置き場所を入れ替えて交差をなくす
   // (左の記号が右の点を、右の記号が左の点を指すような、たすき掛けの指し方をしない)。入れ替えると別の交差や
@@ -26509,9 +26635,12 @@ pmi._lineFarPoint = null;
       // v543: 照合番号などの注記が、寸法線・寸法補助線・寸法値に重なったまま残らないよう、最終位置で確かめてずらす
       try { noteFinalDimCheck(allScreenPmis, mvp); } catch (err) { console.warn('注記と寸法の重なりの最終確認に失敗しました', err); }
       // v630: 近くの照合番号どうしの縦・横の位置をそろえる(通常表示のみ。指示線の長さの上限は守る)
-      if (!showAllAtOnce) { try { alignNotesTidy(allScreenPmis, mvp); } catch (err) { console.warn('注記の位置合わせに失敗しました', err); } }
+      // v636: 四角形(行・列)にそろえる処理(v630)は、いったんやめる
+      if (false) { try { alignNotesTidy(allScreenPmis, mvp); } catch (err) { console.warn('注記の位置合わせに失敗しました', err); } }
       if (showAllAtOnce) { try { perimeterMatchLayout(allScreenPmis, mvp); } catch (err) { console.warn('外周への整列に失敗しました', err); } } // v608
       else { try { leaderCrossSwap(allScreenPmis, mvp); } catch (err) { console.warn('指示線の交差の入れ替えに失敗しました', err); } } // v595
+      // v636: 最後に、指示線・記号どうしのかぶりが一切残らないようにする(残るものは移す。移せなければこの向きでは出さない)
+      if (!showAllAtOnce) { try { overlapFreeGuard(allScreenPmis, mvp); } catch (err) { console.warn('かぶりの最終確認に失敗しました', err); } }
       // v527: 注記・溶接記号の置き場所の変化をなめらかに(目標位置へ少しずつ近づける)
       // v530: 動き方を自然に。(1) 指示線の先(指している点)を中心に、角度と距離に分けて動かす
       // (反対側へ移るときに指している点の上を素通りせず、指示線の長さを保ったまま弧を描いて回り込む)
