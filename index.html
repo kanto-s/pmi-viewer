@@ -1171,7 +1171,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v632</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v633</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1319,6 +1319,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v633: 「PMIを一斉表示」のときの回転と置き場所の計算を速くしました。(1) モデルを画面の升目に塗る処理を、大きな関数から切り出し(ブラウザが高速化できるように)、行ごとに範囲を求める方式にしました(1秒以上→数十ms)。(2) 置き場所の良し悪しの計算結果を使い回すようにしました。(3) 一斉表示ではあとで全部置き直すので、その前の重ならない位置探しを省きました。(4) 置き場所探しの時間の上限を短くしました。(5) 回している間は、寸法補助線をモデルの外形で切る位置を止まっていたときのまま使い、リボンの高さも1コマに1回だけ測るようにしました。こちらの測定では、止めた後の置き直しが約1.5〜3.4秒から約0.6〜0.8秒に、回転中の1コマが約50〜70msから約26msになりました。</li>
         <li>v632: 「全部一斉に出てほしい」とのご要望を受け、PMIの表示・非表示の切り替えを待たずに行うようにしました。照合番号などの注記がゆっくり浮かび上がる演出(0.45秒)をやめ、寸法・溶接記号の切り替わり直後に状態を保つ時間(0.5秒)、照合番号の入れ替わりを保つ時間(0.7秒)、サブアセンブリ選択中に状態を保つ時間(0.7秒)をなくしました。境目でのばたつきを防ぐ「向きの緩衝地帯」はそのまま残しています。</li>
         <li>v631: 回転中と、回転を止めた直後の動作を軽くしました。(1) 回し始めに、表示中の番号・記号の置き場所を全部計算し直していたのをやめ、新しく出てきたものだけを置くようにしました。(2) 回している間は、指示線がほかの部品の上を通るかの細かい判定や、溶接記号の置き場所探しを省き、止めた瞬間にまとめて調べ直します。(3) 止めた後の「落ち着くまで計算し直す」コマでは、視点が同じなら前のコマの配置結果を使い回します。(4) v628で入れた「回している間だけ解像度を下げる」仕組みは、切り替えのたびに画面が一瞬止まる原因になっていたのでやめました。こちらの測定では、回している間の1コマの計算時間が中央値で約7〜11ms、止めた直後の最も重いコマが約130〜270msから約10〜100msになりました。</li>
         <li>v630: 照合番号などの注記の表示位置がばらばらに見えないよう、近くの注記どうしの縦・横の位置をそろえて、行と列(四角形の辺)に並ぶようにしました。指示線の長さの上限(指している配管から50px以内)は守り、そろえるとモデル・寸法・ほかの記号にかかる場合や、指示線がほかの部品の上を通る・交差する場合はそろえません(通常表示のみ)。</li>
@@ -9633,7 +9634,15 @@
   //   NDC Yと実際の画面Y(project()参照)の関係から、リボンの高さぶんの
   //   NDCオフセットを求め、それをORTHO_HALF_HEIGHT(投影行列自体が使う、
   //   縮めていない本来の半分の高さ)倍して平行移動量に変換している。
+  // v633: 同じコマの中では測り直さない(画面の配置の読み取りは重いため)
+  let ribbonHCache = 0, ribbonHCacheF = -1;
   function getRibbonHeightPx() {
+    if (_cvCacheOn && ribbonHCacheF === pmiSmoothFrame) return ribbonHCache;
+    const v = getRibbonHeightPx0();
+    if (_cvCacheOn) { ribbonHCache = v; ribbonHCacheF = pmiSmoothFrame; }
+    return v;
+  }
+  function getRibbonHeightPx0() {
     const header = document.querySelector('header.toolbar');
     const ribbon = document.getElementById('filterPanel');
     let bottom = header ? header.getBoundingClientRect().bottom : 0;
@@ -21891,6 +21900,52 @@ pmi._lineFarPoint = null;
   //     指示線の長さの合計が最小になる結び方では、まっすぐな指示線どうしは交差しない(幾何の性質)。
   //     寸法線・寸法値・モデルの上を通る結び方、部品表・リボンにかかる置き場所は、選ばれないよう重く数える。
   //  3) 列・行の中で、使った置き場所を詰めて等間隔に並べ直す(並び順は変えないので交差しない)。
+  // v633: モデルの三角形を画面の升目(CS px)に塗る(perimeterMatchLayout 用)。返り値は画面上のモデルの範囲 [x0, x1, y0, y1]
+  function rasterModelGrid(T, mvp, cw, ch, CS, GW, GH, mGrid) {
+    let mx0 = Infinity, mx1 = -Infinity, my0 = Infinity, my1 = -Infinity;
+      const m = mvp;
+    if (T && T.length) {
+      const nT = Math.floor(T.length / 9);
+      const sx = [0, 0, 0], sy = [0, 0, 0];
+      for (let t = 0; t < nT; t++) {
+        let ok = true;
+        for (let k = 0; k < 3; k++) {
+          const o = t * 9 + k * 3, x = T[o], y = T[o + 1], z = T[o + 2];
+          const w = m[3] * x + m[7] * y + m[11] * z + m[15];
+          if (w <= 0.0001) { ok = false; break; }
+          const X = (m[0] * x + m[4] * y + m[8] * z + m[12]) / w, Y = (m[1] * x + m[5] * y + m[9] * z + m[13]) / w;
+          sx[k] = (X * 0.5 + 0.5) * cw; sy[k] = (1 - (Y * 0.5 + 0.5)) * ch;
+        }
+        if (!ok) continue;
+        for (let k = 0; k < 3; k++) { if (sx[k] < mx0) mx0 = sx[k]; if (sx[k] > mx1) mx1 = sx[k]; if (sy[k] < my0) my0 = sy[k]; if (sy[k] > my1) my1 = sy[k]; }
+        const ax = sx[0] / CS, ay = sy[0] / CS, bx = sx[1] / CS, by = sy[1] / CS, qx = sx[2] / CS, qy = sy[2] / CS;
+        let x0 = Math.floor(Math.min(ax, bx, qx)), x1 = Math.floor(Math.max(ax, bx, qx)), y0 = Math.floor(Math.min(ay, by, qy)), y1 = Math.floor(Math.max(ay, by, qy));
+        if (x1 < 0 || y1 < 0 || x0 >= GW || y0 >= GH) continue;
+        x0 = Math.max(0, x0); y0 = Math.max(0, y0); x1 = Math.min(GW - 1, x1); y1 = Math.min(GH - 1, y1);
+        const area = (bx - ax) * (qy - ay) - (by - ay) * (qx - ax);
+        if (Math.abs(area) < 1e-6 || (x1 - x0 <= 1 && y1 - y0 <= 1)) { for (let yy = y0; yy <= y1; yy++) for (let xx = x0; xx <= x1; xx++) mGrid[yy * GW + xx] = 1; continue; }
+        const sg = area > 0 ? 1 : -1;
+        // v633: 升目を1つずつ調べる代わりに、行ごとに三角形の内側になる範囲(左端〜右端)を式で求めて塗る(結果は同じ)。
+        // 細長く斜めの三角形(配管の側面)で、外接する四角の中の升目を全部調べていたため、一斉表示の置き直しが数秒かかっていた。
+        const eA0 = -(by - ay) * sg, eA1 = -(qy - by) * sg, eA2 = -(ay - qy) * sg;
+        const z0 = Math.abs(eA0) < 1e-12, z1 = Math.abs(eA1) < 1e-12, z2 = Math.abs(eA2) < 1e-12;
+        for (let yy = y0; yy <= y1; yy++) {
+          const py = yy + 0.5;
+          let lo = -Infinity, hi = Infinity;
+          // 各辺について A*px + B >= -0.5 となる px の範囲(A=0 なら B だけで決まる)
+          const B0 = ((bx - ax) * (py - ay) + (by - ay) * ax) * sg, B1 = ((qx - bx) * (py - by) + (qy - by) * bx) * sg, B2 = ((ax - qx) * (py - qy) + (ay - qy) * qx) * sg;
+          if (z0) { if (B0 < -0.5) continue; } else { const v = (-0.5 - B0) / eA0; if (eA0 > 0) { if (v > lo) lo = v; } else if (v < hi) hi = v; }
+          if (z1) { if (B1 < -0.5) continue; } else { const v = (-0.5 - B1) / eA1; if (eA1 > 0) { if (v > lo) lo = v; } else if (v < hi) hi = v; }
+          if (z2) { if (B2 < -0.5) continue; } else { const v = (-0.5 - B2) / eA2; if (eA2 > 0) { if (v > lo) lo = v; } else if (v < hi) hi = v; }
+          if (lo > hi) continue;
+          const xs = Math.max(x0, Math.ceil(lo - 0.5)), xe = Math.min(x1, Math.floor(hi - 0.5));
+          const rowB = yy * GW;
+          for (let xx = xs; xx <= xe; xx++) mGrid[rowB + xx] = 1;
+        }
+      }
+    }
+        return [mx0, mx1, my0, my1];
+  }
   let perimMatchCache = null, perimMatchRel = null;
   function perimeterMatchLayout(allScreenPmis, mvp) {
     if (!showAllAtOnce) return;
@@ -21964,39 +22019,10 @@ pmi._lineFarPoint = null;
     const mGrid = new Uint8Array(GW * GH);
     let mx0 = Infinity, mx1 = -Infinity, my0 = Infinity, my1 = -Infinity;
     {
+      // v633: 塗る処理は別の小さな関数で行う(この関数は大きすぎてブラウザが高速化できず、塗る処理だけで1秒以上かかっていた)
       const T = (occView !== 'all' && occSelected >= 0 && modelOcclusionTris) ? modelOcclusionTris : (modelAllTris || modelOcclusionTris);
-      const m = mvp;
-      if (T && T.length) {
-        const nT = Math.floor(T.length / 9);
-        const sx = [0, 0, 0], sy = [0, 0, 0];
-        for (let t = 0; t < nT; t++) {
-          let ok = true;
-          for (let k = 0; k < 3; k++) {
-            const o = t * 9 + k * 3, x = T[o], y = T[o + 1], z = T[o + 2];
-            const w = m[3] * x + m[7] * y + m[11] * z + m[15];
-            if (w <= 0.0001) { ok = false; break; }
-            const X = (m[0] * x + m[4] * y + m[8] * z + m[12]) / w, Y = (m[1] * x + m[5] * y + m[9] * z + m[13]) / w;
-            sx[k] = (X * 0.5 + 0.5) * cw; sy[k] = (1 - (Y * 0.5 + 0.5)) * ch;
-          }
-          if (!ok) continue;
-          for (let k = 0; k < 3; k++) { if (sx[k] < mx0) mx0 = sx[k]; if (sx[k] > mx1) mx1 = sx[k]; if (sy[k] < my0) my0 = sy[k]; if (sy[k] > my1) my1 = sy[k]; }
-          const ax = sx[0] / CS, ay = sy[0] / CS, bx = sx[1] / CS, by = sy[1] / CS, qx = sx[2] / CS, qy = sy[2] / CS;
-          let x0 = Math.floor(Math.min(ax, bx, qx)), x1 = Math.floor(Math.max(ax, bx, qx)), y0 = Math.floor(Math.min(ay, by, qy)), y1 = Math.floor(Math.max(ay, by, qy));
-          if (x1 < 0 || y1 < 0 || x0 >= GW || y0 >= GH) continue;
-          x0 = Math.max(0, x0); y0 = Math.max(0, y0); x1 = Math.min(GW - 1, x1); y1 = Math.min(GH - 1, y1);
-          const area = (bx - ax) * (qy - ay) - (by - ay) * (qx - ax);
-          if (Math.abs(area) < 1e-6 || (x1 - x0 <= 1 && y1 - y0 <= 1)) { for (let yy = y0; yy <= y1; yy++) for (let xx = x0; xx <= x1; xx++) mGrid[yy * GW + xx] = 1; continue; }
-          const sg = area > 0 ? 1 : -1;
-          for (let yy = y0; yy <= y1; yy++) {
-            const py = yy + 0.5;
-            for (let xx = x0; xx <= x1; xx++) {
-              const px = xx + 0.5;
-              const w0 = ((bx - ax) * (py - ay) - (by - ay) * (px - ax)) * sg, w1 = ((qx - bx) * (py - by) - (qy - by) * (px - bx)) * sg, w2 = ((ax - qx) * (py - qy) - (ay - qy) * (px - qx)) * sg;
-              if (w0 >= -0.5 && w1 >= -0.5 && w2 >= -0.5) mGrid[yy * GW + xx] = 1;
-            }
-          }
-        }
-      }
+      const bb = rasterModelGrid(T, mvp, cw, ch, CS, GW, GH, mGrid);
+      mx0 = bb[0]; mx1 = bb[1]; my0 = bb[2]; my1 = bb[3];
     }
     if (!(mx1 > mx0)) { mx0 = Math.min(...items.map((i) => i.O.x)); mx1 = Math.max(...items.map((i) => i.O.x)); my0 = Math.min(...items.map((i) => i.O.y)); my1 = Math.max(...items.map((i) => i.O.y)); }
     // 寸法線・寸法値
@@ -22418,7 +22444,7 @@ pmi._lineFarPoint = null;
       const badOf = (A, L) => { let c = 0; const RA = rectAt(A, A.C); for (const B of L) { if (B === A) continue; if (segCrossesSeg(A.S, A.O, B.S, B.O) || segCrossesSeg(B.S, B.O, A.S, A.O)) c += 1; if (segTouchesRect(A.S, A.O, rectAt(B, B.C), 1) || segTouchesRect(B.S, B.O, RA, 1)) c += 1; if (ov(RA, rectAt(B, B.C), 0)) c += 3; } return c; };
       const total = () => { const L = P(); let c = 0; for (const A of L) c += badOf(A, L); return c; };
       const gOf = (it) => { for (const G of groups.values()) { const k = G.list.findIndex((e) => e.it === it); if (k >= 0) return [G, k]; } return [null, -1]; };
-      const tEnd = performance.now() + (moving ? 5 : 200);
+      const tEnd = performance.now() + (moving ? 5 : 60); // v633: 200→60
       for (let round = 0; round < 8 && performance.now() < tEnd; round++) {
         let improved = false;
         const L = P();
@@ -22454,7 +22480,7 @@ pmi._lineFarPoint = null;
     // かぶりを調べ、かぶっているものと、指示線が長いものは、指している所の近くの空いている所(モデルも寸法も無い所)へ移す。
     // 移す先は、ほかのどれともかぶらない所だけ。
     if (!moving) {
-      const tFix = performance.now() + 1200;
+      const tFix = performance.now() + 250; // v633: 1200→250
       const startOf = (it, C) => {
         if (it.knee) { const sg = it.O.x >= C.x ? 1 : -1; return { x: C.x + sg * it.knee.ax, y: C.y + it.knee.ky }; }
         const dx = it.O.x - C.x, dy = it.O.y - C.y;
@@ -22476,7 +22502,16 @@ pmi._lineFarPoint = null;
         it.keepEnd = Math.max(22, best + 8);
       }
       const live = () => items.filter((it) => it.C);
+      // v633: 同じ置き場所の良し悪しを何度も計算し直さないよう、結果を覚えておく(この計算の中では、モデル・寸法・
+      // 置けない所は変わらないので、記号・置き場所・指している点・指示線の端の扱いが同じなら結果も同じ)
+      const selfBadMemo = new Map();
       const selfBad = (it, C, S) => {
+        const mk = (it.p.id) + '|' + C.x + ',' + C.y + '|' + it.O.x + ',' + it.O.y + '|' + (it.keepEnd || 0) + '|' + (it.knee ? 1 : 0);
+        let v = selfBadMemo.get(mk);
+        if (v === undefined) { v = selfBad0(it, C, S); selfBadMemo.set(mk, v); }
+        return v;
+      };
+      const selfBad0 = (it, C, S) => {
         const R = rectAt(it, C);
         let n2 = 0;
         if (!inScreen(R) || banned.some((b) => ov(R, b, 0))) n2 += 50;
@@ -22535,7 +22570,7 @@ pmi._lineFarPoint = null;
         if (!changed) break;
       }
       // 交差・かぶりが残る2つは、置き場所を入れ替えてみる(たすき掛けは入れ替えると解ける)
-      const tSw = performance.now() + 300;
+      const tSw = performance.now() + 80; // v633: 300→80
       for (let round = 0; round < 4 && performance.now() < tSw; round++) {
         let sw = false;
         const L = live();
@@ -22553,7 +22588,7 @@ pmi._lineFarPoint = null;
         if (!sw) break;
       }
       // v619: それでも残るかぶりは、かぶっている2つを同時に動かして解く(1つずつでは解けない込み合った所のため)
-      const tJ = performance.now() + 900;
+      const tJ = performance.now() + 200; // v633: 900→200
       for (let round = 0; round < 3 && performance.now() < tJ; round++) {
         let fixed = false;
         const L = live();
@@ -22608,7 +22643,7 @@ pmi._lineFarPoint = null;
     // 残るものは、かぶらない所(モデルにも重ならない所)へ移す。移せる所が無ければ、この向きでは出さない
     // (かぶったままは絶対に出さない)。指示線が交差してよいのは寸法線・寸法補助線だけ。
     if (!moving) {
-      const tG = performance.now() + 800; // v627: 1500→800(先に全部をいっしょに置き直すので)
+      const tG = performance.now() + 200; // v633: 800→200 // v627: 1500→800(先に全部をいっしょに置き直すので)
       const startOf = (it, C) => {
         if (it.knee) { const sg = it.O.x >= C.x ? 1 : -1; return { x: C.x + sg * it.knee.ax, y: C.y + it.knee.ky }; }
         const dx = it.O.x - C.x, dy = it.O.y - C.y;
@@ -22666,7 +22701,7 @@ pmi._lineFarPoint = null;
       // v627: まだ出せていないものは、それとじゃまをしているもの(まとめて8つまで)を、いっしょに置き直す。
       // それぞれの置き場所の候補(モデル・寸法値・寸法線・部品表などにかからない所)から、互いに重ならず
       // 指示線どうしも交差しない組み合わせを、指示線の短い候補から順に探す(見つかれば全部出せる)。
-      const tM = performance.now() + 600;
+      const tM = performance.now() + 150; // v633: 600→150
       const staticCands = (it, fixed) => {
         const out = [];
         const r0 = it.relaxLeader, O0 = it.O;
@@ -22913,7 +22948,7 @@ pmi._lineFarPoint = null;
       // v627: それでも出せないものは、指示線を1回折り曲げて(JIS Z 8322: 引出線は折り曲げてもよい)、モデルの
       // すき間を通して指す。指している点から、外へ出るまでの1区間だけモデルの上を通って折れ点へ出て、
       // 折れ点から記号までは、モデル・寸法値・ほかの番号・記号・指示線のどれにもかからない道筋にする。
-      const tB = performance.now() + 300;
+      const tB = performance.now() + 80; // v633: 300→80
       const segsOf = (it) => it.bend ? [[it.S, it.bend], [it.bend, it.O]] : [[it.S, it.O]];
       for (const h of items) {
         if (h.C || performance.now() > tB) continue;
@@ -24191,7 +24226,9 @@ pmi._lineFarPoint = null;
     return f;
   }
   function extTouchModel(mvp, f, over) { return cutLineAtModelOutline(mvp, f, over, EXT_SNAP_EXTEND_PX); }
+  const extCutCache = new Map(); // v633
   function updateJisDimensionLines(mvp, dimensionPmis) {
+    const movingJ = isUserViewMoving(performance.now());
     const svg = document.getElementById('dimensionJisLines');
     if (!svg) return;
     const out = [];
@@ -24208,7 +24245,15 @@ pmi._lineFarPoint = null;
       curOp = pmiFadeAttr(pmi);
       // JIS 11.3: 寸法線は測定方向に平行。
       draw(g.a,g.b,'jis-dim-line');
-      for(const e of g.exts) draw(extTouchModel(mvp,e.feature,e.over),e.over,'jis-dim-extension');
+      // v633: 回している間は、止まっていたときに求めた「寸法補助線をモデルの外形で切る位置」(線の上の割合)を使う(毎コマ調べ直すと重いため)
+      for (let ei = 0; ei < g.exts.length; ei++) {
+        const e = g.exts[ei], ck = pmi.id + ':' + ei;
+        const dx = e.over.x - e.feature.x, dy = e.over.y - e.feature.y, L2 = dx * dx + dy * dy;
+        let fp;
+        if (movingJ && extCutCache.has(ck)) { const t = extCutCache.get(ck); fp = { x: e.feature.x + dx * t, y: e.feature.y + dy * t }; }
+        else { fp = extTouchModel(mvp, e.feature, e.over); extCutCache.set(ck, L2 > 1e-9 ? ((fp.x - e.feature.x) * dx + (fp.y - e.feature.y) * dy) / L2 : 0); }
+        draw(fp, e.over, 'jis-dim-extension');
+      }
     }
     svg.innerHTML=out.join('');
   }
@@ -26182,9 +26227,10 @@ pmi._lineFarPoint = null;
       if (!radialSkip) { try { applyRadialPmiLayout(allScreenPmis, mvp); } catch (err) { console.warn('放射状配置に失敗しました', err); } }
       // v378: 溶接記号・注記のタグが寸法値と重なっていたら、重ならない位置へ移す
       // (件数によらず、放射状配置の後に必ず行う)。
-      try { resolveTagOverlapsWithDimensionText(allScreenPmis, mvp); } catch (err) { console.warn('寸法値との重なり回避に失敗しました', err); }
+      // v633: 一斉表示のときは、このあと外周への整列(perimeterMatchLayout)で番号・記号をすべて置き直すので省く
+      if (!showAllAtOnce) try { resolveTagOverlapsWithDimensionText(allScreenPmis, mvp); } catch (err) { console.warn('寸法値との重なり回避に失敗しました', err); }
       // v495: 溶接記号の矢がほかの部品の上を通っていたら、横切らない置き場所へ移す
-      try { resolveWeldLeaderCrossings(allScreenPmis, mvp); } catch (err) { console.warn('溶接記号の指示線の横切り回避に失敗しました', err); }
+      if (!showAllAtOnce) try { resolveWeldLeaderCrossings(allScreenPmis, mvp); } catch (err) { console.warn('溶接記号の指示線の横切り回避に失敗しました', err); }
 
       const dockAvoid = getPartsTableDockRect();
       // v411: リボンの下と、左上のサブアセンブリ選択パネルにも、タグが隠れないようにする
@@ -27330,7 +27376,14 @@ pmi._lineFarPoint = null;
             // だけすき間をあける)位置に文字の中心を置く。
             if (dimTextMat && rawLineLen > 1e-6 && !isDiameterForBest) {
               const sc = dimTagScaleFor(pmi);
-              const H = tagEl.offsetHeight * sc, W = tagEl.offsetWidth * sc;
+              // v633: 文字の素の大きさ(offsetWidth/offsetHeight)は、文字・書式が同じなら変わらないので覚えておく。
+              // 毎コマ・寸法ごとに読むと、そのたびに画面の配置の計算(重い)が走り、一斉表示で寸法が多いときに
+              // 回転が重くなっていた。
+              const szKey = tagEl.className + '|' + tagEl.textContent + '|' + tagEl.style.fontSize + '|' + tagEl.style.padding;
+              let H0, W0;
+              if (tagEl._szKey === szKey && tagEl._szW > 0) { W0 = tagEl._szW; H0 = tagEl._szH; }
+              else { H0 = tagEl.offsetHeight; W0 = tagEl.offsetWidth; if (W0 > 0 && H0 > 0) { tagEl._szKey = szKey; tagEl._szW = W0; tagEl._szH = H0; } }
+              const H = H0 * sc, W = W0 * sc;
               const lx = dx / rawLineLen, ly = dy / rawLineLen;
               let nX = -ly, nY = lx; // 寸法線の法線
               const downX = dimTextMat.c, downY = dimTextMat.d; // 文字の下方向(CSSのy軸)
