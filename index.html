@@ -1171,7 +1171,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v637</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v638</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1319,6 +1319,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v638: 回転中の1コマを軽くしました(表示している内容は回し始めた時のまま保ち、位置だけをモデルと一緒に動かします)。回している間は、次の計算をしないようにしました: 置き場所が前の位置のままでよいかの確かめ、指示線・記号どうしのかぶりの確かめ直し、指示線がモデルを横切るかの確かめ直し、寸法値をモデルから外す位置の探し直し(止まっていたときのずらし量を使う)、タグどうしを押し離す処理、寸法値の範囲の測定、一斉表示での新しく出てきた番号の置き場所の計算(止めた瞬間に置きます)。また、番号・記号の画面上の範囲を毎コマ測り直さず、止まっていたときの範囲を動いた分だけずらして使うようにしました(測るたびに画面全体の配置の計算が走っていたため)。あわせて、一斉表示で、置き場所が無いため隠した番号が、丸も指示線も無い数字だけの状態で出ていたのを直しました。</li>
         <li>v637: 動きが重い原因を調べ、使われない計算をやめました。(1) 回している間に新しく出てきた番号・記号の置き場所の計算と、番号・記号を寸法値と重ならない位置へずらす計算は、止めた瞬間にすべて計算し直して捨てられるため、回している間は行わないようにしました。(2) 回している間はリボンの高さを測り直さないようにしました(測るたびに画面の配置の計算が走るため)。(3) 使っている端末で重さを確かめられるよう、URLの末尾に ?perf=1 を付けるか Shift+P で、1コマの間隔と計算時間を画面左下に表示する「計測」表示を加えました。</li>
         <li>v636: 照合番号などを行・列(四角形)にそろえる処理(v630)を、いったんやめました。代わりに通常表示の最後に、表示中の照合番号・注記・溶接記号について、記号どうしの重なり、記号と寸法値の重なり、指示線がほかの記号・寸法値にかかること、指示線どうしの交差が残っていないかを調べ、残っているものは指している点のまわりのかぶらない所(モデルにも重ならず、指示線がほかの部品の上を通らない所)へ移すようにしました。移せる所が無いものは、その向きでは表示しません(かぶったままは出しません)。指示線が寸法線・寸法補助線を横切るのはよいことにしています。</li>
         <li>v635: PMIの表示が遅く感じられる問題を直しました。(1) 寸法値の置き場所の変化を、ばねでゆっくり近づける動き(約0.3秒)をやめ、すぐに置くようにしました(回転中に寸法値がモデルに遅れてついてくる・止めた後にゆっくり移るのを防ぐ)。(2) 描くのが遅い端末で、回転を止めたと判定するまでの待ち時間が最大0.6秒までのびていたのを、最大0.15秒にしました。</li>
@@ -22119,9 +22120,12 @@ pmi._lineFarPoint = null;
       if (!el || el.style.display === 'none') continue;
       const oL = leaderModelPoint(p);
       const O = oL ? project(mvp, oL) : null;
-      const g = measureTagCenterOffset(p);
+      // v637: 回している間は、記号の大きさ・折れ点の位置を測り直さない(測るたびに画面の配置の計算が走るため)
+      const g = (moving && p._pmG) ? p._pmG : measureTagCenterOffset(p);
+      p._pmG = g;
       if (!O || !g || !(g.w > 0)) continue;
       let knee = null;
+      if (moving && p._pmKneeSet) { items.push({ p, O, g, knee: p._pmKnee }); continue; }
       if (p.category === 'weld') {
         try {
           const tag = el.querySelector('.pmi-tag'), ic = el.querySelector('.pmi-weld-icon');
@@ -22133,6 +22137,7 @@ pmi._lineFarPoint = null;
           }
         } catch (e) { knee = null; }
       }
+      p._pmKnee = knee; p._pmKneeSet = true;
       items.push({ p, O, g, knee });
     }
     if (!items.length) return;
@@ -22170,7 +22175,9 @@ pmi._lineFarPoint = null;
     // 回している間は並べ直さず、止めたときの「指す点からのずれ」を保ったまま一緒に動かす(軽くするため)
     if (moving && perimMatchRel) {
       let all = true;
-      for (const it of items) { const r = perimMatchRel.get(it.p.id); if (r === undefined) { all = false; break; } it.C = r ? { x: it.O.x + r.dx, y: it.O.y + r.dy } : null; it.bend = r && r.b ? { x: it.O.x + r.b.dx, y: it.O.y + r.b.dy } : null; } // v622: 隠したものは隠したまま
+      // v637: 回している間に新しく出てきたもの(止めたときの置き場所が無いもの)は、止めるまで出さない。
+      // 以前は1つでも新しいものがあると、回している間に全部の置き場所を計算し直していた(重い)
+      for (const it of items) { const r = perimMatchRel.get(it.p.id); it.C = r ? { x: it.O.x + r.dx, y: it.O.y + r.dy } : null; it.bend = r && r.b ? { x: it.O.x + r.b.dx, y: it.O.y + r.b.dy } : null; } // v622: 隠したものは隠したまま
       if (all) { apply(); return; }
     }
     // モデルの絵(升目): 三角形を4px升目に塗る(指示線がモデルの上を通るかを速く調べるため)
@@ -23222,7 +23229,10 @@ pmi._lineFarPoint = null;
                 if (it.bend) perimMatchCache.B.set(it.p.id, it.bend);
                 if (perimMatchRel) perimMatchRel.set(it.p.id, { dx: it.C.x - it.O.x, dy: it.C.y - it.O.y, b: it.bend ? { dx: it.bend.x - it.O.x, dy: it.bend.y - it.O.y } : null });
               }
-              apply();
+              // v638: ここでは直接表示せず、置き場所の記録だけを更新して、確定を解いて次のコマで描き直す
+              // (次のコマで、指示線・丸の描画と、かぶりの最終確認をいっしょに行う。直接表示すると、
+              // 指示線や丸の無い数字だけが出ることがあった)
+              showAllLockKey = null; markRenderActive(600);
             }
             return gens.some((e) => !e.done) && BEND_TOTAL_MS - bendUsed > 0;
           },
@@ -24716,6 +24726,18 @@ pmi._lineFarPoint = null;
       markRenderActive(2000);
     }
   });
+  // v637: 回している間は、番号・記号(回転しない)の画面上の範囲を測り直さず、止まっていたときに測った範囲を、
+  // 記号の置き場所が動いた分だけずらして使う(測るたびに画面全体の配置の計算が走り、回転が重くなっていたため)
+  function tagRectCached(pmi, el, key) {
+    const c = pmi[key];
+    if (c && pmi._screen && isUserViewMoving(performance.now())) {
+      const dx = pmi._screen.x - c.sx, dy = pmi._screen.y - c.sy;
+      return { left: c.l + dx, top: c.t + dy, right: c.r + dx, bottom: c.b + dy, width: c.r - c.l, height: c.b - c.t };
+    }
+    const r = el.getBoundingClientRect();
+    if (pmi._screen) pmi[key] = { sx: pmi._screen.x, sy: pmi._screen.y, l: r.left, t: r.top, r: r.right, b: r.bottom };
+    return r;
+  }
   function render() {
     { const t = performance.now(); const gap = t - (pmiSmoothLastT || t - 16); pmiSmoothDt = Math.min(50, Math.max(1, gap)); pmiSmoothLastT = t; pmiSmoothFrame++; pmiSmoothMoving = false;
       if (gap > 0 && gap < 1500) pmiFrameGapMs = pmiFrameGapMs * 0.7 + gap * 0.3; } // v624
@@ -26406,7 +26428,7 @@ pmi._lineFarPoint = null;
       // 最後にもう一度掛けておく(v176と同じ理由)。寸法もここに含める
       // ことで、整列後の注記・溶接記号のタグと寸法のタグが重ならない
       // ようにする(寸法自体の位置調整は最小限にとどまる)。
-      declutterScreenPmis(allScreenPmis);
+      if (!isUserViewMoving(performance.now())) declutterScreenPmis(allScreenPmis); // v637: 回している間は行わない
 
       // v227: ユーザーから、寸法のタグ(φ21.7)の中を、別の注記(<1>)への
       // 指示線が突き抜けて見えるとの指摘があった。それまでの重なり回避
@@ -26606,7 +26628,7 @@ pmi._lineFarPoint = null;
       // 配置の計算結果(重なりを避けた位置)へ移す。重なりの数は、番号・記号どうしの重なり、
       // 指示線がほかの番号・記号を通る、指示線どうしの交差、番号・記号が寸法値・寸法線に
       // かかる、の合計で比べる。
-      try {
+      if (!isUserViewMoving(performance.now())) try { // v637: 回している間は行わない(置き場所は保つだけ)
         const movers = allScreenPmis.filter((p) => p._rawLayoutPos && p._screen);
         if (movers.length) {
           const geoC = new Map(movers.map((p) => [p, measureTagCenterOffset(p)]));
@@ -26767,8 +26789,9 @@ pmi._lineFarPoint = null;
       if (declutterSvg) {
         const svgLines = [];
         const guardEntries = []; // v622: 実際に描く指示線と記号の枠(最後のかぶり確認用)
+        const movingG = isUserViewMoving(performance.now()); // v637: 回している間は、かぶりの確かめ直しをしない(隠したものは隠したまま)
         for (const pmi of allScreenPmis) {
-          if (pmi._guardHidden) { // v622: 前回かぶりで隠したものは、いったん戻して確かめ直す
+          if (pmi._guardHidden && !movingG) { // v622: 前回かぶりで隠したものは、いったん戻して確かめ直す
             pmi._guardHidden = false;
             const gEl = markerEls.get(pmi.id);
             if (gEl && gEl.dataset.guardHid === '1') { delete gEl.dataset.guardHid; if (!pmi._leaderCrossHidden && !(showAllAtOnce && pmi._perimeterHidden)) gEl.style.visibility = ''; }
@@ -26842,7 +26865,7 @@ pmi._lineFarPoint = null;
           const weldIconEl = pmi.category === 'weld' && markerEls.get(pmi.id)
             ? markerEls.get(pmi.id).querySelector('.pmi-weld-icon') : null;
           if (weldIconEl) {
-            const iconRect = weldIconEl.getBoundingClientRect();
+            const iconRect = tagRectCached(pmi, weldIconEl, '_rcIcon');
             if (iconRect.width > 0 && iconRect.height > 0) {
               // v419: 記号ごとに折れ点の位置が違うので、SVGに書いた位置(data-knee-*)を使う
               const kfx = parseFloat(weldIconEl.dataset.kneeFx), kfy = parseFloat(weldIconEl.dataset.kneeFy);
@@ -26923,7 +26946,7 @@ pmi._lineFarPoint = null;
               clipY = targetY;
             }
           } else if (tagEl) {
-            let rect = tagEl.getBoundingClientRect();
+            let rect = tagRectCached(pmi, tagEl, '_rcTag');
             // v375: 「<2>」のような枠の無い注記(is-note-bracket)は、タグの
             // 余白(padding)の外周で線を止めると、文字との間にすき間ができ、
             // 指示線が注記に届いていないように見えていた。枠が無いので、
@@ -27000,8 +27023,9 @@ pmi._lineFarPoint = null;
           // 指示線)をこの向きでは表示しない。指している点のすぐ手前(モデルの外形に触れるところ)は数えない。
           // v600: 一斉表示に切り替える前に隠していた番号・記号は、一斉表示中は元に戻す(指示線だけ残って記号が消えていた)
           if (showAllAtOnce && pmi._leaderCrossHidden) { pmi._leaderCrossHidden = false; const mEl = markerEls.get(pmi.id); if (mEl) mEl.style.visibility = ''; }
-          if (showAllAtOnce && pmi._perimeterHidden) continue; // v600: 置き場所が無く隠したものは指示線も描かない
-          if (!showAllAtOnce) { // v597: 一斉表示のときは外周に並べるので、指示線がモデルの上を通っても隠さない
+          if (showAllAtOnce && pmi._perimeterHidden) { const hEl = markerEls.get(pmi.id); if (hEl && hEl.style.visibility !== 'hidden') hEl.style.visibility = 'hidden'; continue; } // v600: 置き場所が無く隠したものは指示線も描かない / v638: 番号だけが(丸も指示線も無く)出たままにならないよう、記号も必ず隠す
+          if (!showAllAtOnce && isUserViewMoving(performance.now())) { if (pmi._leaderCrossHidden) continue; } // v637: 回している間は調べ直さない(止めたときの表示のまま)
+          else if (!showAllAtOnce) { // v597: 一斉表示のときは外周に並べるので、指示線がモデルの上を通っても隠さない
             let crosses = false;
             try {
               const cov = getScreenCover(mvp);
@@ -27061,7 +27085,8 @@ pmi._lineFarPoint = null;
                 '"' + pmiFadeAttr(pmi) + ' fill="' + colorToCss(pmi.id === selectedId ? COLOR_HIGHLIGHT : pmi._color) + '" />');
             }
           }
-          { // v622: 最後のかぶり確認のため、描いた指示線(記号側→指している側)と記号の枠を覚えておく
+          if (movingG) { if (pmi._guardHidden) svgLines.length = svgLine0; } // v637: 隠したものの指示線は描かない
+          else { // v622: 最後のかぶり確認のため、描いた指示線(記号側→指している側)と記号の枠を覚えておく
             const gEl = markerEls.get(pmi.id), gTag = gEl ? gEl.querySelector('.pmi-tag') : null;
             if (gTag && gEl.style.display !== 'none' && gEl.style.visibility !== 'hidden') {
               const r = gTag.getBoundingClientRect();
@@ -27070,7 +27095,7 @@ pmi._lineFarPoint = null;
             }
           }
         }
-        try { finalLeaderGuard(guardEntries, svgLines, allScreenPmis, mvp); } catch (e) { console.warn('指示線のかぶりの最終確認に失敗しました', e); }
+        if (!movingG) try { finalLeaderGuard(guardEntries, svgLines, allScreenPmis, mvp); } catch (e) { console.warn('指示線のかぶりの最終確認に失敗しました', e); }
         declutterSvg.innerHTML = svgLines.join('');
       }
       lastDeclutterStateKey = declutterStateKey;
@@ -27718,7 +27743,11 @@ pmi._lineFarPoint = null;
             if (dimTextMat && rawLineLen > 1e-6 && !isDiameterForBest && placedHW > 0 && placedHH > 0 &&
                 !(dimExtSegs.length && dimExtSegs[dimExtSegs.length - 1]._pmi === pmi)) {
               try {
-                const cov = getScreenCover(mvp);
+                // v637: 回している間は、止まっていたときに求めた「寸法線に沿ってずらした量」をそのまま使う(毎コマ探すと重いため)
+                const lxS = dx / rawLineLen, lyS = dy / rawLineLen;
+                const cov = isUserViewMoving(performance.now()) && pmi._dimShiftK != null ? null : getScreenCover(mvp);
+                if (!cov && pmi._dimShiftK != null) { markerLeft += lxS * pmi._dimShiftK; markerTop += lyS * pmi._dimShiftK; }
+                if (cov) pmi._dimShiftK = 0;
                 if (cov) {
                   const onModelAt = (cx, cy) => {
                     for (let i = 0; i < 6; i++) for (let j = 0; j < 4; j++) {
@@ -27740,7 +27769,7 @@ pmi._lineFarPoint = null;
                         if (!onModelAt(cx, cy)) { found = { x: cx, y: cy }; break; }
                       }
                     }
-                    if (found) { markerLeft = found.x; markerTop = found.y; }
+                    if (found) { pmi._dimShiftK = (found.x - markerLeft) * lx + (found.y - markerTop) * ly; markerLeft = found.x; markerTop = found.y; }
                   }
                 }
               } catch (e) { /* ずらせなければそのまま */ }
@@ -27787,7 +27816,7 @@ pmi._lineFarPoint = null;
             }
           }
         }
-        {
+        if (!isUserViewMoving(performance.now())) { // v637: 寸法値の範囲は止まっているときの置き直しにだけ使うので、回している間は測らない
           const crR = cvRect();
           for (const [pmi, tagEl] of dimRectPending) {
             const fr = tagEl.getBoundingClientRect();
@@ -27843,7 +27872,7 @@ pmi._lineFarPoint = null;
           const tagEl = marker ? marker.querySelector('.pmi-tag') : null;
           if (!tagEl) continue;
           if (marker.style.visibility === 'hidden') continue;
-          const rect = tagEl.getBoundingClientRect();
+          const rect = tagRectCached(pmi, tagEl, '_rcOutline');
           if (rect.width <= 0 || rect.height <= 0) continue;
           let local2D = pmi.noteOutlineLocal2D;
           // v343: 「正方形にして」との指摘を受けた。実際のSTEPファイルの
@@ -27924,6 +27953,9 @@ pmi._lineFarPoint = null;
       }
       if (seamChanged) markRenderActive(120);
     } catch (e) { /* 次のコマで */ }
+    // v638: 一斉表示で置き場所が無いため隠した番号・記号は、ほかの処理が表示に戻していても必ず隠す
+    // (丸も指示線も無い数字だけが出ていたため)
+    if (showAllAtOnce) for (const q of pmiList) if (q._perimeterHidden || q._guardHidden) { const e = markerEls.get(q.id); if (e && e.style.visibility !== 'hidden') e.style.visibility = 'hidden'; }
     try { updatePmiFades(); } catch (e) { console.warn('updatePmiFades failed:', e); }
     restorePmiGhosts();
     requestAnimationFrame(render);
