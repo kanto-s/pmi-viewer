@@ -1171,7 +1171,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v641</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v642</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1319,6 +1319,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v642: 「PMIを一斉表示」で全部出したまま、PMIどうしの重なりを無くしました。これまでの並べ方で置き場所が見つからなかった番号・記号は、画面全体から指している点に近い順に、ほかの番号・記号・指示線・寸法値・寸法線・寸法補助線と重ならない場所を探して置きます(指示線どうしの交差やモデルとの重なりも、できるだけ避けます)。</li>
         <li>v641: 寸法線・寸法補助線が、回している間に止まったままになり、モデルの回転についてきていなかったのを直しました。回している間も毎コマ描き直します。</li>
         <li>v640: 「PMIを一斉表示」を押している間は、すべてのPMI(寸法・注記・照合番号・溶接記号)を隠さずに出し続けるようにしました。並べる場所が無い番号・記号や、ほかの記号・指示線とかぶる番号・記号も隠さず、寸法も線が画面上で短く見える向きで消さないようにしました。回している間も同じです。</li>
         <li>v639: PMIの表示方法を元に戻しました。一斉表示で番号・記号を並べたとき、指示線を折り曲げる表示(記号 → 折れ点 → 指す点)と、折れ点の探索を、以前と同じように行います(直線だけの指示線にする変更を取り消しました)。回している間の計算を省く仕組みなど、計算の速さに関わるところは変えていません。</li>
@@ -23218,6 +23219,43 @@ pmi._lineFarPoint = null;
         return changed;
       };
       runGens(Math.min(BEND_SYNC_MS, tB - performance.now()));
+      // v642: 「全部出したまま、PMIどうしの重なりを無くす」。上の探索で置き場所が見つからなかった番号・記号は、
+      // 隠さずに(v640)、画面全体から、指している点に近い順に、重ならない場所を探して置く。
+      // 必ず守ること: ほかの番号・記号の枠と重ならない、寸法値・寸法線・寸法補助線に重ならない、
+      // ほかの指示線が枠にかからない、自分の指示線がほかの枠にかからない。
+      // できるだけ守ること(見つからなければ順に緩める): 指示線どうしが交差しない・枠がモデルに重ならない。
+      {
+        const rest = items.filter((h) => !h.C);
+        if (rest.length) {
+          for (const e of gens) e.done = true; // 残りはここで置くので、後から続ける探索はしない
+          const STEP = 12;
+          for (const h of rest) {
+            const others = live().map((o) => ({ R: rectAt(o, o.C), segs: segsOf(o) }));
+            const cands = [];
+            for (let y = top0 + h.g.h / 2 + 2; y <= bottom0 - h.g.h / 2 - 2; y += STEP)
+              for (let x = left0 + h.g.w / 2 + 2; x <= right0 - h.g.w / 2 - 2; x += STEP)
+                cands.push({ x: Math.round(x), y: Math.round(y), d: (x - h.O.x) * (x - h.O.x) + (y - h.O.y) * (y - h.O.y) });
+            cands.sort((p1, p2) => p1.d - p2.d);
+            let placed = false;
+            for (let tier = 0; tier < 3 && !placed; tier++) {
+              for (const c of cands) {
+                const C = { x: c.x, y: c.y }, R = rectAt(h, C);
+                if (banned.some((b2) => ov(R, b2, 0))) continue;
+                if (others.some((e) => ov(R, e.R, 4))) continue;
+                if (dimRects.some((d) => ov(R, d, 2)) || dimTouch(R, 2)) continue;
+                if (others.some((e) => e.segs.some(([a2, b2]) => segTouchesRect(a2, b2, R, 3)))) continue;
+                if (tier < 2 && rectOnModel({ x0: R.x0 - 2, x1: R.x1 + 2, y0: R.y0 - 2, y1: R.y1 + 2 })) continue;
+                const S = startOf(h, C);
+                if (others.some((e) => segTouchesRect(S, h.O, e.R, 3))) continue;
+                if (banned.some((b2) => segTouchesRect(S, h.O, b2, 1))) continue;
+                if (dimRects.some((d) => segTouchesRect(S, h.O, d, 1))) continue;
+                if (tier < 1 && (others.some((e) => e.segs.some(([a2, b2]) => leaderSegsConflict(S, h.O, a2, b2))) || leaderExitBad(S, h.O))) continue;
+                h.C = C; h.S = S; h.bend = null; h.kind = 'F'; placed = true; break;
+              }
+            }
+          }
+        }
+      }
       perimBendJob = null;
       if (gens.some((e) => !e.done)) {
         const jobKey = key;
