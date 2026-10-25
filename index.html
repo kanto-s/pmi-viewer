@@ -1171,7 +1171,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v638</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v639</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1319,6 +1319,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v639: PMIの表示方法を元に戻しました。一斉表示で番号・記号を並べたとき、指示線を折り曲げる表示(記号 → 折れ点 → 指す点)と、折れ点の探索を、以前と同じように行います(直線だけの指示線にする変更を取り消しました)。回している間の計算を省く仕組みなど、計算の速さに関わるところは変えていません。</li>
         <li>v638: 回転中の1コマを軽くしました(表示している内容は回し始めた時のまま保ち、位置だけをモデルと一緒に動かします)。回している間は、次の計算をしないようにしました: 置き場所が前の位置のままでよいかの確かめ、指示線・記号どうしのかぶりの確かめ直し、指示線がモデルを横切るかの確かめ直し、寸法値をモデルから外す位置の探し直し(止まっていたときのずらし量を使う)、タグどうしを押し離す処理、寸法値の範囲の測定、一斉表示での新しく出てきた番号の置き場所の計算(止めた瞬間に置きます)。また、番号・記号の画面上の範囲を毎コマ測り直さず、止まっていたときの範囲を動いた分だけずらして使うようにしました(測るたびに画面全体の配置の計算が走っていたため)。あわせて、一斉表示で、置き場所が無いため隠した番号が、丸も指示線も無い数字だけの状態で出ていたのを直しました。</li>
         <li>v637: 動きが重い原因を調べ、使われない計算をやめました。(1) 回している間に新しく出てきた番号・記号の置き場所の計算と、番号・記号を寸法値と重ならない位置へずらす計算は、止めた瞬間にすべて計算し直して捨てられるため、回している間は行わないようにしました。(2) 回している間はリボンの高さを測り直さないようにしました(測るたびに画面の配置の計算が走るため)。(3) 使っている端末で重さを確かめられるよう、URLの末尾に ?perf=1 を付けるか Shift+P で、1コマの間隔と計算時間を画面左下に表示する「計測」表示を加えました。</li>
         <li>v636: 照合番号などを行・列(四角形)にそろえる処理(v630)を、いったんやめました。代わりに通常表示の最後に、表示中の照合番号・注記・溶接記号について、記号どうしの重なり、記号と寸法値の重なり、指示線がほかの記号・寸法値にかかること、指示線どうしの交差が残っていないかを調べ、残っているものは指している点のまわりのかぶらない所(モデルにも重ならず、指示線がほかの部品の上を通らない所)へ移すようにしました。移せる所が無いものは、その向きでは表示しません(かぶったままは出しません)。指示線が寸法線・寸法補助線を横切るのはよいことにしています。</li>
@@ -21150,7 +21151,7 @@ pmi._lineFarPoint = null;
     if (!showAllAtOnce) return;
     // v608: 1回の並べ直しにかける時間の上限(重くならないように)。最後の折り曲げの分は別に取っておく
     const P_T0 = performance.now(), P_MOV = isUserViewMoving(P_T0);
-    const PDL = P_T0 + (P_MOV ? 25 : 450), PDL2 = P_T0 + (P_MOV ? 35 : 650);
+    const PDL = P_T0 + (P_MOV ? 25 : 520), PDL2 = P_T0 + (P_MOV ? 35 : 720);
     // v604: 実際に描かれる指示線の出だし(注記は、記号の中心と指している点を結ぶ線が枠と交わる所。
     // 溶接記号は、指している点の側の基線の端)。重なり・交差の判定はこの線で行う
     const leaderStart = (C, g, O, it) => {
@@ -21958,7 +21959,7 @@ pmi._lineFarPoint = null;
         return n;
       };
       const costP = (A) => { let n = selfP(A); for (const o of L) if (o !== A) n += pairP(A, o); return n; };
-      if (rectOkFn && modelAtFn && performance.now() < PDL2) {
+      if (rectOkFn && modelAtFn && performance.now() < PDL2) { // v639: 折れ点の探索を元に戻した
         const tB2 = PDL2;
         const bad = L.filter((A) => costP(A) > 0).sort((p1, p2) => costP(p2) - costP(p1));
         for (const A of bad) {
@@ -24738,6 +24739,14 @@ pmi._lineFarPoint = null;
     if (pmi._screen) pmi[key] = { sx: pmi._screen.x, sy: pmi._screen.y, l: r.left, t: r.top, r: r.right, b: r.bottom };
     return r;
   }
+  // SVG内容が変化しないフレームではDOM再構築を行わない。
+  // PMI可視判定・座標・引出線・配置処理には介入しない。
+  const _pmiSvgMarkupCache = new WeakMap();
+  function setPmiSvgMarkup(el, markup) {
+    if (_pmiSvgMarkupCache.get(el) === markup) return;
+    _pmiSvgMarkupCache.set(el, markup);
+    el.innerHTML = markup;
+  }
   function render() {
     { const t = performance.now(); const gap = t - (pmiSmoothLastT || t - 16); pmiSmoothDt = Math.min(50, Math.max(1, gap)); pmiSmoothLastT = t; pmiSmoothFrame++; pmiSmoothMoving = false;
       if (gap > 0 && gap < 1500) pmiFrameGapMs = pmiFrameGapMs * 0.7 + gap * 0.3; } // v624
@@ -26149,12 +26158,18 @@ pmi._lineFarPoint = null;
       // すぐに回し始めるとワンテンポ遅れて回っていた。
       if (!showAllAtOnce && declutterSettleUntil > nowMs && declutterStateKey === lastDeclutterStateKey && !isUserViewMoving(nowMs) &&
           showAllStableCount >= 2 && !pmiSmoothMoving) declutterSettleUntil = 0;
-      const useDeclutterCache = showAllLocked || (declutterStateKey === lastDeclutterStateKey && nowMs >= declutterSettleUntil);
+      // 回転中は前回確定したラベルの相対オフセットを使い、毎フレームの重い全体配置探索を省く。
+      // 投影・PMI描画・直線の接続先更新は従来通り毎フレーム実行する。
+      const useDeclutterCache = isUserViewMoving(nowMs) || showAllLocked || (declutterStateKey === lastDeclutterStateKey && nowMs >= declutterSettleUntil);
       if (useDeclutterCache) {
         for (const pmi of allScreenPmis) {
-          if (pmi._declutterDX != null) {
-            pmi._screen.x = pmi._naturalScreenX + pmi._declutterDX;
-            pmi._screen.y = pmi._naturalScreenY + pmi._declutterDY;
+          // 毎フレーム再投影したPMIの自然位置へ追従させる。
+          // 静止時に決定した配置のオフセットのみ再利用し、画面座標そのものは固定しない。
+          if (Number.isFinite(pmi._naturalScreenX) && Number.isFinite(pmi._naturalScreenY)) {
+            const dx = Number.isFinite(pmi._declutterDX) ? pmi._declutterDX : 0;
+            const dy = Number.isFinite(pmi._declutterDY) ? pmi._declutterDY : 0;
+            pmi._screen.x = pmi._naturalScreenX + dx;
+            pmi._screen.y = pmi._naturalScreenY + dy;
           }
         }
         // v182: ユーザーから「これでは指示線を引く意味がなくなるので、
@@ -26175,7 +26190,7 @@ pmi._lineFarPoint = null;
         refreshHeldPolar(allScreenPmis, mvp);
         // v566: 置き場所が決まった後(計算を省いているコマ)でも、照合番号に寸法の線・寸法値が重なって
         // いれば、マウスを近づけなくてもその寸法をすぐ隠す(B案)。
-        try { noteDimOverlapSweep(allScreenPmis, mvp); } catch (err) { /* 次のコマで */ }
+        if (!isUserViewMoving(performance.now())) try { noteDimOverlapSweep(allScreenPmis, mvp); } catch (err) { /* 次のコマで */ }
       } else {
       // v181: ユーザーから「指示線の長さや角度を自動調整することで事故ら
       // ないようにしてほしい。最初から重ならないように、各指示線の角度・
@@ -26785,6 +26800,10 @@ pmi._lineFarPoint = null;
       // 直線で結ぶように変更した。この場合は実引出線自体を描かない(上の
       // 3D描画ループのpmi._wasDecluttered参照)ことで、二重線・折れ曲がり
       // を避けている。
+      lastDeclutterStateKey = declutterStateKey;
+      lastDeclutterBaseKey = declutterBaseKey;
+      } // v177: if (declutterStateKey === lastDeclutterStateKey) ... else の閉じ
+      // 回転中もSVG指示線を毎フレーム再投影して更新する。配置探索のみキャッシュする。
       const declutterSvg = document.getElementById('declutterLines');
       if (declutterSvg) {
         const svgLines = [];
@@ -26840,9 +26859,14 @@ pmi._lineFarPoint = null;
           // v607: 一斉表示で並べたものは、並べるときに決めた指す点へ結ぶ。指示線を折り曲げたものは、
           // 記号からは折れ点へ向けて引き、折れ点から指す点まで引く
           const perimOn = showAllAtOnce && pmi._perimeterPlaced && pmi._perimO;
-          const perimAim = perimOn && pmi._perimBend ? pmi._perimBend : null;
+          // v639: 折り曲げた指示線の表示を元に戻した(記号 → 折れ点 → 指す点)。指す点はこのコマで投影し直した点を使い、
+          // 折れ点は、並べたときの「指す点からの位置」を保って一緒に動かす(回している間は並べ直しを省くため、
+          // 並べたときの画面の位置そのものを使うと、指す点・折れ点が止まって見えるため)。止まっているときは
+          // 並べたときの位置と同じになる。
+          const perimAim = perimOn && pmi._perimBend
+            ? { x: modelScreen.x + (pmi._perimBend.x - pmi._perimO.x), y: modelScreen.y + (pmi._perimBend.y - pmi._perimO.y) } : null;
           let realTip = null;
-          if (perimOn) { realTip = { x: pmi._perimO.x, y: pmi._perimO.y }; modelScreen = perimAim ? { x: perimAim.x, y: perimAim.y } : { x: realTip.x, y: realTip.y }; pmi._modelScreenForHit = realTip; }
+          if (perimOn) { realTip = { x: modelScreen.x, y: modelScreen.y }; modelScreen = perimAim ? { x: perimAim.x, y: perimAim.y } : { x: realTip.x, y: realTip.y }; pmi._modelScreenForHit = realTip; }
           // v161: ユーザーから「注記の四角や〇の中点もしくは中心に向かう
           // 角度になるように書いてほしい」との指摘があった。それまでは
           // pmi._screen(マーカーの位置決めの基準点=タグ本体より左にある
@@ -27096,11 +27120,9 @@ pmi._lineFarPoint = null;
           }
         }
         if (!movingG) try { finalLeaderGuard(guardEntries, svgLines, allScreenPmis, mvp); } catch (e) { console.warn('指示線のかぶりの最終確認に失敗しました', e); }
-        declutterSvg.innerHTML = svgLines.join('');
+        setPmiSvgMarkup(declutterSvg, svgLines.join(''));
       }
-      lastDeclutterStateKey = declutterStateKey;
-      lastDeclutterBaseKey = declutterBaseKey;
-      } // v177: if (declutterStateKey === lastDeclutterStateKey) ... else の閉じ
+
 
       // v229〜v234: 寸法の数値を線に沿って回転・線の上に配置する機能を、
       // 元はここより上のv177スロットルの「else」(カメラの状態が変わった
@@ -27892,7 +27914,7 @@ pmi._lineFarPoint = null;
             '" stroke-width="1.5" />'
           );
         }
-        noteOutlineSvg.innerHTML = polys.join('');
+        setPmiSvgMarkup(noteOutlineSvg, polys.join(''));
       }
 
       // update the leader-line-length handle screen positions (ひし形)
