@@ -1171,7 +1171,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v642</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v643</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1319,6 +1319,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v643: 「PMIを一斉表示」の番号・記号を、モデル(と寸法)を囲む1つの四角形の4辺の上に、四角形に沿って等間隔に並べるようにしました。どれをどこに置くかは、指示線が短く、モデルを貫通しない組み合わせ(ハンガリアン法)で決め、指示線どうしが交差するときは置き場所を入れ替えて交差を無くします。</li>
         <li>v642: 「PMIを一斉表示」で全部出したまま、PMIどうしの重なりを無くしました。これまでの並べ方で置き場所が見つからなかった番号・記号は、画面全体から指している点に近い順に、ほかの番号・記号・指示線・寸法値・寸法線・寸法補助線と重ならない場所を探して置きます(指示線どうしの交差やモデルとの重なりも、できるだけ避けます)。</li>
         <li>v641: 寸法線・寸法補助線が、回している間に止まったままになり、モデルの回転についてきていなかったのを直しました。回している間も毎コマ描き直します。</li>
         <li>v640: 「PMIを一斉表示」を押している間は、すべてのPMI(寸法・注記・照合番号・溶接記号)を隠さずに出し続けるようにしました。並べる場所が無い番号・記号や、ほかの記号・指示線とかぶる番号・記号も隠さず、寸法も線が画面上で短く見える向きで消さないようにしました。回している間も同じです。</li>
@@ -22229,6 +22230,147 @@ pmi._lineFarPoint = null;
     };
     const ov = (a, b, m) => a.x0 < b.x1 + m && a.x1 > b.x0 - m && a.y0 < b.y1 + m && a.y1 > b.y0 - m;
     const inScreen = (R) => R.x0 >= left0 && R.x1 <= right0 && R.y0 >= top0 && R.y1 <= bottom0;
+    // v643: 「モデルの外側に四角形を描くようにPMIを配置してほしい。モデルを貫通したり、指示線どうしが交差したりしない
+    // ように。指示どうしの間隔は等間隔に」との要望。一斉表示の番号・記号を、モデル(と寸法)を囲む1つの四角形の
+    // 4辺の上に、四角形に沿って等間隔に並べる。どの番号・記号をどの位置に置くかは、指示線の長さ・モデルの上を
+    // 通るかで重みを付けた最小の組み合わせ(ハンガリアン法)で決め、そのあと交差する2本があれば置き場所を
+    // 入れ替えて交差を無くす(入れ替えで交差・貫通が増えるときは入れ替えない)。
+    {
+      const RT0 = performance.now();
+      const n = items.length;
+      const maxW = Math.max(...items.map((it) => it.g.w)), maxH = Math.max(...items.map((it) => it.g.h));
+      // 囲む範囲: モデル・寸法値・寸法線・寸法補助線・指している点
+      let bx0 = mx0, bx1 = mx1, by0 = my0, by1 = my1;
+      const addPt = (x, y) => { if (!isFinite(x) || !isFinite(y)) return; if (x < bx0) bx0 = x; if (x > bx1) bx1 = x; if (y < by0) by0 = y; if (y > by1) by1 = y; };
+      for (const d of dimRects) { addPt(d.x0, d.y0); addPt(d.x1, d.y1); }
+      for (const [a, b] of dimSegs) { addPt(a.x, a.y); addPt(b.x, b.y); }
+      for (const it of items) addPt(it.O.x, it.O.y);
+      const startAt = (it, C) => {
+        if (it.knee) { const sg = it.O.x >= C.x ? 1 : -1; return { x: C.x + sg * it.knee.ax, y: C.y + it.knee.ky }; }
+        const dx = it.O.x - C.x, dy = it.O.y - C.y;
+        const tx = Math.abs(dx) > 1e-6 ? (it.g.w / 2) / Math.abs(dx) : Infinity, ty = Math.abs(dy) > 1e-6 ? (it.g.h / 2) / Math.abs(dy) : Infinity;
+        const t = Math.min(1, tx, ty);
+        return { x: C.x + dx * t, y: C.y + dy * t };
+      };
+      const rectAtC = (it, C) => ({ x0: C.x - it.g.w / 2, x1: C.x + it.g.w / 2, y0: C.y - it.g.h / 2, y1: C.y + it.g.h / 2 });
+      const onM = (x, y) => { const gx = Math.floor(x / CS), gy = Math.floor(y / CS); return gx >= 0 && gy >= 0 && gx < GW && gy < GH && mGrid[gy * GW + gx] === 1; };
+      // 指示線がモデルを貫通する長さ(px)。指している点からモデルの外へ出るまでの1区間は、指すために必要なので数えない。
+      // いったん外へ出たあと、またモデルの上を通る長さを数える
+      const pierce = (O, S) => {
+        const L = Math.hypot(S.x - O.x, S.y - O.y), nn = Math.max(1, Math.ceil(L / 3));
+        let out = false, len = 0;
+        for (let k = 1; k < nn; k++) {
+          const on = onM(O.x + (S.x - O.x) * k / nn, O.y + (S.y - O.y) * k / nn);
+          if (!on) out = true; else if (out) len += L / nn;
+        }
+        return len;
+      };
+      // 四角形(番号・記号の中心が乗る線)を作り、使える所(画面の中・部品表などに重ならない所)に等間隔の位置を用意する
+      const makeSlots = (gap, phase) => {
+        const F = {
+          x0: Math.max(left0 + maxW / 2 + 2, bx0 - gap - maxW / 2), x1: Math.min(right0 - maxW / 2 - 2, bx1 + gap + maxW / 2),
+          y0: Math.max(top0 + maxH / 2 + 2, by0 - gap - maxH / 2), y1: Math.min(bottom0 - maxH / 2 - 2, by1 + gap + maxH / 2),
+        };
+        if (!(F.x1 > F.x0) || !(F.y1 > F.y0)) return null;
+        const W = F.x1 - F.x0, H = F.y1 - F.y0, P = 2 * (W + H);
+        const at = (t) => { // 左上から時計回り
+          t = ((t % P) + P) % P;
+          if (t < W) return { x: F.x0 + t, y: F.y0 };
+          if (t < W + H) return { x: F.x1, y: F.y0 + (t - W) };
+          if (t < 2 * W + H) return { x: F.x1 - (t - W - H), y: F.y1 };
+          return { x: F.x0, y: F.y1 - (t - 2 * W - H) };
+        };
+        const STEPP = 2, ok = [];
+        const probe = { g: { w: maxW, h: maxH } };
+        for (let t = 0; t < P; t += STEPP) { const R = rectAtC(probe, at(t)); ok.push(!banned.some((b2) => ov(R, b2, 2))); }
+        const U = ok.reduce((a2, v) => a2 + (v ? STEPP : 0), 0);
+        if (U <= 0) return null;
+        const d = U / n, pos = [];
+        let acc = 0, want = d * (phase || 0.5), ti = 0;
+        for (let t = 0; t < P && pos.length < n; t += STEPP, ti++) {
+          if (!ok[ti]) continue;
+          acc += STEPP;
+          if (acc >= want) { pos.push(at(t)); want += d; }
+        }
+        while (pos.length < n) pos.push(at(0));
+        // 隣どうしの記号が重ならない間隔か(辺に沿った向きの大きさで比べる)
+        const need = Math.max(maxW, maxH) + 8;
+        return { F, pos, d, fits: d >= need };
+      };
+      let SL = null;
+      function better(a2, b2) { return a2.cr !== b2.cr ? a2.cr < b2.cr : (Math.abs(a2.pl - b2.pl) > 1 ? a2.pl < b2.pl : a2.cs < b2.cs - 1e-6); }
+      let gapUse = 18;
+      for (let gap = 18; gap <= 600; gap += 24) { const s0 = makeSlots(gap, 0.5); if (!s0) break; SL = s0; gapUse = gap; if (s0.fits) break; }
+      // 等間隔の位置を四角形に沿って少しずつずらした並べ方(8通り)を試し、交差・貫通が少なく指示線が短いものを使う
+      let best = null;
+      for (let ph = 0; ph < 8 && SL; ph++) {
+        const SLp = ph === 0 ? SL : makeSlots(gapUse, (ph + 0.5) / 8 + 0.0);
+        if (!SLp) continue;
+        const r = assignSlots(SLp);
+        if (r && (!best || better(r.score, best.score))) best = Object.assign(r, { SL: SLp });
+      }
+      if (best) {
+        const slots = best.SL.pos; SL = best.SL;
+        let as = best.as, cur = best.score;
+        for (let i = 0; i < n; i++) { const it = items[i], C = slots[as[i]]; it.C = { x: C.x, y: C.y }; it.S = startAt(it, it.C); it.bend = null; it.kind = 'Q'; }
+        window.__rectLayout = { n, spacing: SL.d, fits: SL.fits, crossings: cur.cr, pierce: Math.round(cur.pl), ms: Math.round(performance.now() - RT0) };
+        if (!moving) perimFullSinceMove = true;
+        perimBendJob = null;
+        perimMatchCache = { key, mv: moving, C: new Map(items.map((it) => [it.p.id, it.C])), B: new Map() };
+        perimMatchRel = new Map(items.map((it) => [it.p.id, { dx: it.C.x - it.O.x, dy: it.C.y - it.O.y, b: null }]));
+        window.__perimMs = performance.now() - T0;
+        apply();
+        return;
+      }
+      function assignSlots(SLx) {
+        const AT0 = performance.now();
+        const slots = SLx.pos;
+        // 重み: 指示線の長さ + 貫通(大きな重み) + 寸法値の上を通る
+        const cost = [], pc = [];
+        for (let i = 0; i < n; i++) {
+          const it = items[i], row = [], prow = [];
+          for (let j = 0; j < n; j++) {
+            const C = slots[j], S = startAt(it, C);
+            const pl = pierce(it.O, S);
+            let c = Math.hypot(S.x - it.O.x, S.y - it.O.y) + pl * 60;
+            if (dimRects.some((dr) => segTouchesRect(S, it.O, dr, 1))) c += 400;
+            row.push(c); prow.push(pl);
+          }
+          cost.push(row); pc.push(prow);
+        }
+        let as = null;
+        try { as = hungarianAssign(cost, n, n); } catch (e) { as = null; }
+        if (!as) as = Int32Array.from(items.map((_, i) => i));
+        const segOf = (i, j) => { const C = slots[j]; return { S: startAt(items[i], C), O: items[i].O, R: rectAtC(items[i], C) }; };
+        // 交差・かぶり(指示線どうしの交差、指示線がほかの記号にかかる)の数
+        const badPair = (i, ji, k, jk) => {
+          const A = segOf(i, ji), B = segOf(k, jk);
+          return leaderSegsConflict(A.S, A.O, B.S, B.O) || segTouchesRect(A.S, A.O, B.R, 2) || segTouchesRect(B.S, B.O, A.R, 2);
+        };
+        const crossOf = (i, ji, A) => { let c2 = 0; for (let k = 0; k < n; k++) if (k !== i && badPair(i, ji, k, A[k])) c2++; return c2; };
+        const totalScore = (A) => {
+          let cr = 0, pl = 0, cs = 0;
+          for (let i = 0; i < n; i++) { pl += pc[i][A[i]]; cs += cost[i][A[i]]; for (let k = i + 1; k < n; k++) if (badPair(i, A[i], k, A[k])) cr++; }
+          return { cr, pl, cs };
+        };
+        let cur = totalScore(as);
+        // 入れ替え: 交差しているものを中心に、置き場所の入れ替えで良くなるものを探す(時間の上限あり)
+        for (let iter = 0; iter < 400 && cur.cr > 0 && performance.now() - AT0 < 40; iter++) {
+          let improved = false;
+          for (let i = 0; i < n && !improved; i++) {
+            if (!crossOf(i, as[i], as)) continue;
+            for (let k = 0; k < n && !improved; k++) {
+              if (k === i) continue;
+              const A2 = Int32Array.from(as); const t2 = A2[i]; A2[i] = A2[k]; A2[k] = t2;
+              const sc = totalScore(A2);
+              if (better(sc, cur)) { as = A2; cur = sc; improved = true; }
+            }
+          }
+          if (!improved) break;
+        }
+        return { as, score: cur };
+      }
+    }
     // 置き場所(枠)を用意する。枠は細かい間隔(FINE px)で用意し、割り当てたあとで等間隔に詰める
     const GAPM = 26, GAPL = 10, FINE = 16;
     const maxW = Math.max(...items.map((it) => it.g.w)), maxH = Math.max(...items.map((it) => it.g.h));
