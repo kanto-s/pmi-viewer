@@ -1171,7 +1171,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v648</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v649</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1319,7 +1319,8 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
-        <li>v648: 一斉表示で番号・記号が1周の四角形に入りきらないとき、記号を小さくする前に、四角形の内側にもう1周作って2周の上にそれぞれ等間隔で並べるようにしました(外側への指示線が内側の記号のあいだを通るよう、半分ずらして置きます)。記号を縮める下限を30%から50%に上げ、縮めるのは記号どうしが実際に重なるときだけにしました(重ならなければ元の大きさのまま)。部品表などの欄の横は、四角形をその手前で止めるか欄の所だけ飛ばすかを、並べられる長さが長い方で選びます。</li>
+        <li>v649: 一斉表示の並びを常に1つの四角形にしました。部品表・サブアセンブリの欄・リボンが出ているときも、欄の所を飛ばすのではなく、四角形そのものを欄の手前までにします(並びに切れ目を作りません)。また、寸法・注記・溶接記号のサイズを変えたときは、四角形の大きさ・記号どうしの間隔を自動で取り直します。</li>
+        <li>v648: 一斉表示で番号・記号が1周の四角形に入りきらないとき、記号を小さくする前に、四角形の内側にもう1周作って2周の上にそれぞれ等間隔で並べるようにしました(外側への指示線が内側の記号のあいだを通るよう、半分ずらして置きます)。記号を縮める下限を30%から50%に上げ(v649で40%)、縮めるのは記号どうしが実際に重なるときだけにしました(重ならなければ元の大きさのまま)。部品表などの欄の横は、四角形をその手前で止めるか欄の所だけ飛ばすかを、並べられる長さが長い方で選びます。</li>
         <li>v647: 一斉表示を、モデル(と寸法)を囲む1つのきれいな四角形の周の上に、すべての番号・記号を同じ間隔で並べる方式にしました。どれをどこに置くかは、指している点と記号の中心の距離の合計が一番短くなる組み合わせをハンガリアン法で求めます(この組み合わせでは指示線どうしは交差しません)。四角形は、隣どうしの記号が重ならない間隔になる大きさまで広げます(画面の中で、部品表などは避けます)。</li>
         <li>v646: 一斉表示の置き場所の決め方を作り直しました。モデル(と寸法)のすぐ外側の四角形の並び(足りないときは外側にもう1周)に細かく置き場所の候補を用意し、どの番号・記号をどこに置くかを、指している点からの距離の合計が一番短くなるようにハンガリアン法で決めます(距離の合計が最短の組み合わせでは指示線どうしが交差しません)。並びの中で重なるものは、順番を変えずに一番近い位置へ詰め、詰めたものどうしのすき間は等しくします。入りきらないものは外側の周へ移します。四角形をモデルに近づけ、指示線を短くしました。溶接記号は記号の絵まで含めた大きさで場所を取ります。画面の外・部品表にかかる所、指示線がモデルを貫通する所には置きません。</li>
         <li>v645: 一斉表示の並べ方を直しました。並びの中の記号どうしのすき間をすべて同じ(14px)にそろえ、まとまりを指している点の近くに寄せました(並びの端から端へ広げていたため、指示線が斜めに長くなり、ほかの記号にかぶったり交差したりしていました)。指示線が記号のモデル側の辺に届かない斜めすぎる置き場所は使わないようにしました。また、記号を画面(ブラウザの見えている範囲)の外に置かないようにしました(回している間も)。</li>
@@ -15460,6 +15461,8 @@
   weldSizeValue.textContent = DEFAULT_WELD_TEXT_TARGET_RADIUS + 'mm';
 
   dimensionSizeSlider.addEventListener('input', () => {
+    // v649: サイズを変えたら、一斉表示の並べ方(四角形の大きさ・間隔・縮小率)を自動で取り直す
+    if (showAllAtOnce) { try { setSaZoom(1); window.__saFitShrunkKey = null; perimMatchCache = null; perimMatchRel = null; markRenderActive(800); } catch (e) { /* 次のコマで */ } }
     const v = Math.min(SLIDER_DIMENSION_MAX, Math.max(SLIDER_DIMENSION_MIN, parseFloat(dimensionSizeSlider.value) || DEFAULT_GLYPH_TARGET_RADIUS));
     GLYPH_TARGET_RADIUS = v;
     dimensionSizeValue.textContent = Math.round(v) + 'mm';
@@ -15471,6 +15474,8 @@
     refreshAllDimensionTags();
   });
   noteSizeSlider.addEventListener('input', () => {
+    // v649: サイズを変えたら、一斉表示の並べ方(四角形の大きさ・間隔・縮小率)を自動で取り直す
+    if (showAllAtOnce) { try { setSaZoom(1); window.__saFitShrunkKey = null; perimMatchCache = null; perimMatchRel = null; markRenderActive(800); } catch (e) { /* 次のコマで */ } }
     const v = Math.min(SLIDER_NOTE_MAX, Math.max(SLIDER_NOTE_MIN, parseFloat(noteSizeSlider.value) || DEFAULT_NOTE_SMALL_GLYPH_TARGET_RADIUS));
     NOTE_SMALL_GLYPH_TARGET_RADIUS = v;
     noteSizeValue.textContent = Math.round(v) + 'mm';
@@ -15484,6 +15489,8 @@
     // rebuildPmiGeometry() の最後(refreshRecordedLabelScales)で一緒に拡大・縮小される。
   });
   weldSizeSlider.addEventListener('input', () => {
+    // v649: サイズを変えたら、一斉表示の並べ方(四角形の大きさ・間隔・縮小率)を自動で取り直す
+    if (showAllAtOnce) { try { setSaZoom(1); window.__saFitShrunkKey = null; perimMatchCache = null; perimMatchRel = null; markRenderActive(800); } catch (e) { /* 次のコマで */ } }
     const v = Math.min(SLIDER_WELD_MAX, Math.max(SLIDER_WELD_MIN, parseFloat(weldSizeSlider.value) || DEFAULT_WELD_TEXT_TARGET_RADIUS));
     WELD_TEXT_TARGET_RADIUS = v;
     WELD_ICON_TARGET_RADIUS = v * WELD_ICON_TO_TEXT_RATIO;
@@ -22272,7 +22279,7 @@ pmi._lineFarPoint = null;
     // 一番短いものを選ぶ。
     let left0V = left0, right0V = right0, top0V = top0, bottom0V = bottom0;
     if (typeof window.__saFitShrunkKey === 'undefined') window.__saFitShrunkKey = null;
-    const SA_FIT_MIN = 0.5; // v648: 縮める下限(これより小さいと文字が読みにくい)
+    const SA_FIT_MIN = 0.4; // v648: 縮める下限(これより小さいと文字が読みにくい)
     {
       const RT0 = performance.now();
       const n = items.length;
@@ -22346,16 +22353,23 @@ pmi._lineFarPoint = null;
         }
         return U;
       };
-      {
-        let bestL = null, bestU = -2;
-        const K = Math.min(4, panels.length);
-        for (let mask = 0; mask < (1 << K); mask++) {
-          const L = Object.assign({}, limBase);
-          for (let q = 0; q < K; q++) if (mask & (1 << q)) restrictBy(L, panels[q]);
-          const U = usableLen(L);
-          if (U > bestU + 1) { bestU = U; bestL = L; }
-        }
-        if (bestL) Object.assign(lim, bestL);
+      // v649: 「常に四角形に」。部品表・サブアセンブリの欄などがあるときは、欄の所を飛ばして並べるのではなく、
+      // 四角形そのものを欄の手前までにする(並びに切れ目を作らない)。斜め(角)にある欄は、四角形が大きく残る方の辺で避ける
+      for (const b2 of panels) {
+        const L = lim, cx = (bx0 + bx1) / 2, cy = (by0 + by1) / 2;
+        if (!(b2.x1 > L.x0 - maxHW && b2.x0 < L.x1 + maxHW && b2.y1 > L.y0 - maxHH && b2.y0 < L.y1 + maxHH)) continue; // 四角形の範囲にかからない
+        const overlapY = b2.y1 > by0 && b2.y0 < by1, overlapX = b2.x1 > bx0 && b2.x0 < bx1;
+        if (overlapY && !overlapX) { if (b2.x0 >= cx) L.x1 = Math.min(L.x1, b2.x0 - maxHW - 2); else L.x0 = Math.max(L.x0, b2.x1 + maxHW + 2); continue; }
+        if (overlapX && !overlapY) { if (b2.y0 >= cy) L.y1 = Math.min(L.y1, b2.y0 - maxHH - 2); else L.y0 = Math.max(L.y0, b2.y1 + maxHH + 2); continue; }
+        const nx = b2.x0 >= cx ? { x1: Math.min(L.x1, b2.x0 - maxHW - 2) } : { x0: Math.max(L.x0, b2.x1 + maxHW + 2) };
+        const ny = b2.y0 >= cy ? { y1: Math.min(L.y1, b2.y0 - maxHH - 2) } : { y0: Math.max(L.y0, b2.y1 + maxHH + 2) };
+        const Ax = Object.assign({}, L, nx), Ay = Object.assign({}, L, ny);
+        const area = (Q) => Math.max(0, Q.x1 - Q.x0) * Math.max(0, Q.y1 - Q.y0) + (Q.x1 - Q.x0) * 0 ;
+        // モデルにかからないものを優先し、残る四角形の周の長さが長い方
+        const okQ = (Q) => Q.x0 <= bx0 - maxHW && Q.x1 >= bx1 + maxHW && Q.y0 <= by0 - maxHH && Q.y1 >= by1 + maxHH;
+        const per = (Q) => 2 * (Math.max(0, Q.x1 - Q.x0) + Math.max(0, Q.y1 - Q.y0));
+        const pick = (okQ(Ax) !== okQ(Ay)) ? (okQ(Ax) ? Ax : Ay) : (per(Ax) >= per(Ay) ? Ax : Ay);
+        Object.assign(L, pick);
       }
       const makeRect = (g) => ({
         x0: Math.max(lim.x0, bx0 - g - maxHW), x1: Math.min(lim.x1, bx1 + g + maxHW),
@@ -22373,7 +22387,7 @@ pmi._lineFarPoint = null;
           return { x: F.x0, y: F.y1 - (t - 2 * Wr - Hr), side: 'L' };
         };
         const ST = 2, ok = [];
-        for (let t = 0; t < P; t += ST) { const q = at(t); const R = { x0: q.x - maxHW, x1: q.x + maxHW, y0: q.y - maxHH, y1: q.y + maxHH }; ok.push(!banned.some((b2) => ov(R, b2, 2))); }
+        for (let t = 0; t < P; t += ST) ok.push(true); // v649: 並びに切れ目を作らない(欄は四角形の大きさで避けている)
         const U = ok.reduce((a2, v) => a2 + (v ? ST : 0), 0);
         if (U <= 0) return null;
         const d = U / cnt, pos = [];
