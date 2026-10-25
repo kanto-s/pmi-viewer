@@ -1171,7 +1171,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v647</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v648</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1319,6 +1319,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v648: 一斉表示で番号・記号が1周の四角形に入りきらないとき、記号を小さくする前に、四角形の内側にもう1周作って2周の上にそれぞれ等間隔で並べるようにしました(外側への指示線が内側の記号のあいだを通るよう、半分ずらして置きます)。記号を縮める下限を30%から50%に上げ、縮めるのは記号どうしが実際に重なるときだけにしました(重ならなければ元の大きさのまま)。部品表などの欄の横は、四角形をその手前で止めるか欄の所だけ飛ばすかを、並べられる長さが長い方で選びます。</li>
         <li>v647: 一斉表示を、モデル(と寸法)を囲む1つのきれいな四角形の周の上に、すべての番号・記号を同じ間隔で並べる方式にしました。どれをどこに置くかは、指している点と記号の中心の距離の合計が一番短くなる組み合わせをハンガリアン法で求めます(この組み合わせでは指示線どうしは交差しません)。四角形は、隣どうしの記号が重ならない間隔になる大きさまで広げます(画面の中で、部品表などは避けます)。</li>
         <li>v646: 一斉表示の置き場所の決め方を作り直しました。モデル(と寸法)のすぐ外側の四角形の並び(足りないときは外側にもう1周)に細かく置き場所の候補を用意し、どの番号・記号をどこに置くかを、指している点からの距離の合計が一番短くなるようにハンガリアン法で決めます(距離の合計が最短の組み合わせでは指示線どうしが交差しません)。並びの中で重なるものは、順番を変えずに一番近い位置へ詰め、詰めたものどうしのすき間は等しくします。入りきらないものは外側の周へ移します。四角形をモデルに近づけ、指示線を短くしました。溶接記号は記号の絵まで含めた大きさで場所を取ります。画面の外・部品表にかかる所、指示線がモデルを貫通する所には置きません。</li>
         <li>v645: 一斉表示の並べ方を直しました。並びの中の記号どうしのすき間をすべて同じ(14px)にそろえ、まとまりを指している点の近くに寄せました(並びの端から端へ広げていたため、指示線が斜めに長くなり、ほかの記号にかぶったり交差したりしていました)。指示線が記号のモデル側の辺に届かない斜めすぎる置き場所は使わないようにしました。また、記号を画面(ブラウザの見えている範囲)の外に置かないようにしました(回している間も)。</li>
@@ -22270,7 +22271,8 @@ pmi._lineFarPoint = null;
     // (画面の中・部品表などを避ける)。並びの始まりの位置を少しずつずらした中から、記号の重なりが無く距離の合計が
     // 一番短いものを選ぶ。
     let left0V = left0, right0V = right0, top0V = top0, bottom0V = bottom0;
-    const SA_FIT_MIN = 0.3; // v647: 縮める下限
+    if (typeof window.__saFitShrunkKey === 'undefined') window.__saFitShrunkKey = null;
+    const SA_FIT_MIN = 0.5; // v648: 縮める下限(これより小さいと文字が読みにくい)
     {
       const RT0 = performance.now();
       const n = items.length;
@@ -22317,30 +22319,51 @@ pmi._lineFarPoint = null;
       const needW = Math.max(...items.map((it) => it.gb.x1 - it.gb.x0)) + GEQ, needH = Math.max(...items.map((it) => it.gb.y1 - it.gb.y0)) + GEQ;
       // 画面の中で四角形(記号の中心が乗る線)が取れる範囲
       const lim = { x0: left0V + maxHW, x1: right0V - maxHW, y0: top0V + maxHH, y1: bottom0V - maxHH };
-      // 部品表・サブアセンブリの欄などが、モデルの横(または上下)にあるときは、四角形をその手前までにする
-      // (四角形の辺が欄にかかって使えなくなり、片側に詰め込まれるのを防ぐ)
-      for (const b2 of banned) {
-        if (b2.x1 - b2.x0 > cw * 0.8) continue; // リボン
+      // 部品表・サブアセンブリの欄などがモデルの横(または上下)にあるとき、四角形を「その手前までにする」か
+      // 「欄の所だけ並びを飛ばす」かを、欄ごとに両方試し、置ける長さ(並びの使える長さ)が一番長くなる方を使う
+      const limBase = Object.assign({}, lim);
+      const panels = banned.filter((b2) => b2.x1 - b2.x0 <= cw * 0.8);
+      const restrictBy = (L, b2) => {
         const cx = (bx0 + bx1) / 2, cy = (by0 + by1) / 2;
         const overlapY = b2.y1 > by0 && b2.y0 < by1, overlapX = b2.x1 > bx0 && b2.x0 < bx1;
-        if (overlapY && b2.x0 >= cx) lim.x1 = Math.min(lim.x1, b2.x0 - maxHW - 2);
-        else if (overlapY && b2.x1 <= cx) lim.x0 = Math.max(lim.x0, b2.x1 + maxHW + 2);
-        else if (overlapX && b2.y0 >= cy) lim.y1 = Math.min(lim.y1, b2.y0 - maxHH - 2);
-        else if (overlapX && b2.y1 <= cy) lim.y0 = Math.max(lim.y0, b2.y1 + maxHH + 2);
-        else {
-          // 斜め(角)にある欄: 四角形が小さくなりすぎない方の辺で避ける
-          const keepW = (b2.x0 >= cx ? b2.x0 - maxHW - 2 - lim.x0 : lim.x1 - (b2.x1 + maxHW + 2)) * (lim.y1 - lim.y0);
-          const keepH = (b2.y0 >= cy ? b2.y0 - maxHH - 2 - lim.y0 : lim.y1 - (b2.y1 + maxHH + 2)) * (lim.x1 - lim.x0);
-          if (keepW >= keepH) { if (b2.x0 >= cx) lim.x1 = Math.min(lim.x1, b2.x0 - maxHW - 2); else lim.x0 = Math.max(lim.x0, b2.x1 + maxHW + 2); }
-          else { if (b2.y0 >= cy) lim.y1 = Math.min(lim.y1, b2.y0 - maxHH - 2); else lim.y0 = Math.max(lim.y0, b2.y1 + maxHH + 2); }
+        if (overlapY && b2.x0 >= cx) L.x1 = Math.min(L.x1, b2.x0 - maxHW - 2);
+        else if (overlapY && b2.x1 <= cx) L.x0 = Math.max(L.x0, b2.x1 + maxHW + 2);
+        else if (overlapX && b2.y0 >= cy) L.y1 = Math.min(L.y1, b2.y0 - maxHH - 2);
+        else if (overlapX && b2.y1 <= cy) L.y0 = Math.max(L.y0, b2.y1 + maxHH + 2);
+        else if (b2.x0 >= cx) L.x1 = Math.min(L.x1, b2.x0 - maxHW - 2); else L.x0 = Math.max(L.x0, b2.x1 + maxHW + 2);
+      };
+      const usableLen = (L) => {
+        const Fm = { x0: L.x0, x1: L.x1, y0: L.y0, y1: L.y1 };
+        if (!(Fm.x1 > Fm.x0 + 20) || !(Fm.y1 > Fm.y0 + 20)) return -1;
+        if (Fm.x0 > bx0 - maxHW || Fm.x1 < bx1 + maxHW || Fm.y0 > by0 - maxHH || Fm.y1 < by1 + maxHH) return -1; // モデルにかかる
+        const Wr = Fm.x1 - Fm.x0, Hr = Fm.y1 - Fm.y0, P = 2 * (Wr + Hr);
+        let U = 0;
+        for (let t = 0; t < P; t += 4) {
+          let x, y;
+          if (t < Wr) { x = Fm.x0 + t; y = Fm.y0; } else if (t < Wr + Hr) { x = Fm.x1; y = Fm.y0 + t - Wr; } else if (t < 2 * Wr + Hr) { x = Fm.x1 - (t - Wr - Hr); y = Fm.y1; } else { x = Fm.x0; y = Fm.y1 - (t - 2 * Wr - Hr); }
+          const R = { x0: x - maxHW, x1: x + maxHW, y0: y - maxHH, y1: y + maxHH };
+          if (!banned.some((b2) => ov(R, b2, 2))) U += 4;
         }
+        return U;
+      };
+      {
+        let bestL = null, bestU = -2;
+        const K = Math.min(4, panels.length);
+        for (let mask = 0; mask < (1 << K); mask++) {
+          const L = Object.assign({}, limBase);
+          for (let q = 0; q < K; q++) if (mask & (1 << q)) restrictBy(L, panels[q]);
+          const U = usableLen(L);
+          if (U > bestU + 1) { bestU = U; bestL = L; }
+        }
+        if (bestL) Object.assign(lim, bestL);
       }
       const makeRect = (g) => ({
         x0: Math.max(lim.x0, bx0 - g - maxHW), x1: Math.min(lim.x1, bx1 + g + maxHW),
         y0: Math.max(lim.y0, by0 - g - maxHH), y1: Math.min(lim.y1, by1 + g + maxHH),
       });
       // 周に沿った n 個の等間隔の位置。置けない所(部品表など)は飛ばして等分する
-      const slotsOn = (F, phase) => {
+      const slotsOn = (F, phase, cnt) => {
+        cnt = cnt || n;
         const Wr = F.x1 - F.x0, Hr = F.y1 - F.y0, P = 2 * (Wr + Hr);
         const at = (t) => {
           t = ((t % P) + P) % P;
@@ -22353,10 +22376,10 @@ pmi._lineFarPoint = null;
         for (let t = 0; t < P; t += ST) { const q = at(t); const R = { x0: q.x - maxHW, x1: q.x + maxHW, y0: q.y - maxHH, y1: q.y + maxHH }; ok.push(!banned.some((b2) => ov(R, b2, 2))); }
         const U = ok.reduce((a2, v) => a2 + (v ? ST : 0), 0);
         if (U <= 0) return null;
-        const d = U / n, pos = [];
+        const d = U / cnt, pos = [];
         let acc = 0, want = d * phase, ti = 0;
-        for (let t = 0; t < P && pos.length < n; t += ST, ti++) { if (!ok[ti]) continue; acc += ST; if (acc >= want) { pos.push(at(t)); want += d; } }
-        while (pos.length < n) pos.push(at(0));
+        for (let t = 0; t < P && pos.length < cnt; t += ST, ti++) { if (!ok[ti]) continue; acc += ST; if (acc >= want) { pos.push(at(t)); want += d; } }
+        while (pos.length < cnt) pos.push(at(0));
         return { pos, d, P };
       };
       // 四角形の大きさ: 隣どうしが重ならない間隔になるまで広げる
@@ -22370,35 +22393,60 @@ pmi._lineFarPoint = null;
         if (F2.x0 <= lim.x0 && F2.x1 >= lim.x1 && F2.y0 <= lim.y0 && F2.y1 >= lim.y1) break; // 画面いっぱい
       }
       if (F && SL) {
+        // v648: 1周では記号の大きさのままでは入りきらないとき(隣どうしが重なる間隔しか取れないとき)は、記号を縮める前に、
+        // 四角形の内側にもう1周(同じ形の一回り小さい四角形)を作り、2周の上にそれぞれ等間隔で並べる(文字を読める大きさに保つため)。
+        // 内側の周はモデル・寸法にかからない大きさのときだけ使う。内側と外側の並びは、外側への指示線が内側の記号の
+        // あいだを通るよう、半分ずらして置く
+        const needD0 = Math.max(needW, needH);
+        let F2 = null, nOut = n, nIn = 0;
+        if (SL.d < needD0 - 0.5) {
+          const ix = 2 * maxHW + GEQ, iy = 2 * maxHH + GEQ;
+          const Fi = { x0: F.x0 + ix, x1: F.x1 - ix, y0: F.y0 + iy, y1: F.y1 - iy };
+          if (Fi.x0 <= bx0 - maxHW - 4 && Fi.x1 >= bx1 + maxHW + 4 && Fi.y0 <= by0 - maxHH - 4 && Fi.y1 >= by1 + maxHH + 4) {
+            const Po = 2 * ((F.x1 - F.x0) + (F.y1 - F.y0)), Pi = 2 * ((Fi.x1 - Fi.x0) + (Fi.y1 - Fi.y0));
+            F2 = Fi; nOut = Math.max(1, Math.round(n * Po / (Po + Pi))); nIn = n - nOut;
+            if (nIn < 1) { F2 = null; nOut = n; nIn = 0; }
+          }
+        }
         const evalPhase = (phase) => {
-          const S0 = slotsOn(F, phase);
+          const S0 = slotsOn(F, phase, nOut);
           if (!S0) return null;
-          const slots = S0.pos;
+          let slots = S0.pos, dMin = S0.d;
+          if (F2) {
+            const S1 = slotsOn(F2, (phase + 0.5) % 1, nIn);
+            if (!S1) return null;
+            slots = slots.concat(S1.pos); dMin = Math.min(dMin, S1.d);
+          }
           const cost = items.map((it) => slots.map((q) => Math.hypot(q.x - it.O.x, q.y - it.O.y)));
           let as = null;
           try { as = hungarianAssign(cost, n, n); } catch (e) { as = null; }
           if (!as) return null;
-          // 記号の重なり(隣どうし・四隅)
+          // 記号の重なり(隣どうし・四隅)と、指示線がほかの記号にかかる数
           const Cs = items.map((it, i) => ({ x: slots[as[i]].x, y: slots[as[i]].y }));
+          const Rs = items.map((it, i) => rectGB(it, Cs[i]));
           let ovc = 0;
-          for (let i = 0; i < n; i++) { const Ri = rectGB(items[i], Cs[i]); for (let k = i + 1; k < n; k++) if (ov(Ri, rectGB(items[k], Cs[k]), 3)) ovc++; }
+          for (let i = 0; i < n; i++) for (let k = i + 1; k < n; k++) if (ov(Rs[i], Rs[k], 3)) ovc++;
+          if (F2) for (let i = 0; i < n; i++) { const S = startAt(items[i], Cs[i]); for (let k = 0; k < n; k++) if (k !== i && segTouchesRect(S, items[i].O, Rs[k], 2)) ovc++; }
           let tot = 0; for (let i = 0; i < n; i++) tot += cost[i][as[i]];
-          return { as, slots, ovc, tot, d: S0.d };
+          return { as, slots, ovc, tot, d: dMin };
         };
         let best = null;
-        for (let k = 0; k < 16; k++) {
-          const r = evalPhase((k + 0.5) / 16);
+        for (let k = 0; k < (F2 ? 24 : 16); k++) {
+          const r = evalPhase((k + 0.5) / (F2 ? 24 : 16));
           if (r && (!best || r.ovc < best.ovc || (r.ovc === best.ovc && r.tot < best.tot))) best = r;
         }
-        // 画面に入りきらない(隣どうしの記号が重なる)ときは、番号・記号を縮めて並べ直す。ゆとりがあれば元の大きさへ戻す
+        // 画面に入りきらない(隣どうしの記号が実際に重なる)ときは、番号・記号を少し縮めて並べ直す。
+        // 重なりが無く、1割大きくしても重ならないときは、元の大きさへ向けて大きくする(読める大きさをできるだけ保つ)
         if (best && !moving) {
-          const needD = Math.max(needW, needH);
-          if ((best.ovc > 0 || best.d < needD - 0.5) && saZoom > SA_FIT_MIN + 1e-3) {
-            const z = Math.max(SA_FIT_MIN, Math.min(saZoom * 0.97, saZoom * Math.sqrt(best.d / needD) * (best.ovc > 0 ? 0.95 : 1)));
-            setSaZoom(z); saZoomRefScale = sceneScale; markRenderActive(400); return;
-          }
-          if (best.ovc === 0 && saZoom < 1 - 1e-3 && best.d > needD * 1.35) {
-            setSaZoom(Math.min(1, saZoom * 1.08)); saZoomRefScale = sceneScale; markRenderActive(400); return;
+          const viewKey = Array.from(mvp, (v) => v.toFixed(4)).join(',') + '|' + cw + 'x' + ch + '|' + n;
+          if (best.ovc > 0 && saZoom > SA_FIT_MIN + 1e-3) { window.__saFitShrunkKey = viewKey; setSaZoom(Math.max(SA_FIT_MIN, saZoom * 0.92)); saZoomRefScale = sceneScale; markRenderActive(400); return; }
+          if (best.ovc === 0 && saZoom < 1 - 1e-3 && window.__saFitShrunkKey !== viewKey) { // 同じ向きで一度縮めたら、大きくし直さない(行ったり来たりを防ぐ)
+            const k = Math.min(1, saZoom * 1.1) / saZoom;
+            const Cs = items.map((it, i) => best.slots[best.as[i]]);
+            const Rs = items.map((it, i) => { const c = Cs[i]; return { x0: c.x + it.gb.x0 * k, x1: c.x + it.gb.x1 * k, y0: c.y + it.gb.y0 * k, y1: c.y + it.gb.y1 * k }; });
+            let okGrow = Rs.every((R) => R.x0 >= left0V && R.x1 <= right0V && R.y0 >= top0V && R.y1 <= bottom0V && !banned.some((b2) => ov(R, b2, 2)));
+            for (let i = 0; i < n && okGrow; i++) for (let j = i + 1; j < n; j++) if (ov(Rs[i], Rs[j], 3)) { okGrow = false; break; }
+            if (okGrow) { setSaZoom(Math.min(1, saZoom * 1.1)); saZoomRefScale = sceneScale; markRenderActive(400); return; }
           }
         }
         if (best) {
@@ -22419,7 +22467,7 @@ pmi._lineFarPoint = null;
           }
           let cr = 0, tl = 0;
           for (let i = 0; i < n; i++) { const A = items[i]; tl += Math.hypot(A.C.x - A.O.x, A.C.y - A.O.y); for (let k = i + 1; k < n; k++) if (crossP(A, items[k])) cr++; }
-          window.__rectLayout = { n, zoom: +saZoom.toFixed(2), spacing: Math.round(best.d), need: Math.round(Math.max(needW, needH)), overlaps: best.ovc, crossings: cr, avgLen: Math.round(tl / n), ms: Math.round(performance.now() - RT0) };
+          window.__rectLayout = { n, rings: F2 ? 2 : 1, zoom: +saZoom.toFixed(2), spacing: Math.round(best.d), need: Math.round(Math.max(needW, needH)), overlaps: best.ovc, crossings: cr, avgLen: Math.round(tl / n), ms: Math.round(performance.now() - RT0) };
           if (!moving) perimFullSinceMove = true;
           perimBendJob = null;
           perimMatchCache = { key, mv: moving, C: new Map(items.map((it) => [it.p.id, it.C])), B: new Map() };
