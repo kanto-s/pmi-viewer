@@ -1171,7 +1171,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v643</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v644</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1319,6 +1319,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v644: 一斉表示の並べ方を直しました。モデル(と寸法)を囲む四角形の外側に、上の行・下の行・左の列・右の列の4つの並びを作り(四隅は空けます)、部品表やサブアセンブリの欄があっても左右の列を使います。並びの中では記号どうしのすき間を等しくし、指している点の位置の順に並べて指示線が交差しないようにします。交差・かぶりが残るときは順番の入れ替えや別の並びへの移動で無くし、入りきらないときは外側にもう1周の並びを作ります。</li>
         <li>v643: 「PMIを一斉表示」の番号・記号を、モデル(と寸法)を囲む1つの四角形の4辺の上に、四角形に沿って等間隔に並べるようにしました。どれをどこに置くかは、指示線が短く、モデルを貫通しない組み合わせ(ハンガリアン法)で決め、指示線どうしが交差するときは置き場所を入れ替えて交差を無くします。</li>
         <li>v642: 「PMIを一斉表示」で全部出したまま、PMIどうしの重なりを無くしました。これまでの並べ方で置き場所が見つからなかった番号・記号は、画面全体から指している点に近い順に、ほかの番号・記号・指示線・寸法値・寸法線・寸法補助線と重ならない場所を探して置きます(指示線どうしの交差やモデルとの重なりも、できるだけ避けます)。</li>
         <li>v641: 寸法線・寸法補助線が、回している間に止まったままになり、モデルの回転についてきていなかったのを直しました。回している間も毎コマ描き直します。</li>
@@ -22230,16 +22231,19 @@ pmi._lineFarPoint = null;
     };
     const ov = (a, b, m) => a.x0 < b.x1 + m && a.x1 > b.x0 - m && a.y0 < b.y1 + m && a.y1 > b.y0 - m;
     const inScreen = (R) => R.x0 >= left0 && R.x1 <= right0 && R.y0 >= top0 && R.y1 <= bottom0;
-    // v643: 「モデルの外側に四角形を描くようにPMIを配置してほしい。モデルを貫通したり、指示線どうしが交差したりしない
-    // ように。指示どうしの間隔は等間隔に」との要望。一斉表示の番号・記号を、モデル(と寸法)を囲む1つの四角形の
-    // 4辺の上に、四角形に沿って等間隔に並べる。どの番号・記号をどの位置に置くかは、指示線の長さ・モデルの上を
-    // 通るかで重みを付けた最小の組み合わせ(ハンガリアン法)で決め、そのあと交差する2本があれば置き場所を
-    // 入れ替えて交差を無くす(入れ替えで交差・貫通が増えるときは入れ替えない)。
+    // v644: 「モデルの外側に四角形を描くようにPMIを配置。モデルを貫通・指示線どうしの交差をしない。指示どうしは等間隔」。
+    // v643 の、四角形1周に中心を等間隔に置く方式は、部品表・サブアセンブリの欄で左右の辺が使えなくなり、
+    // 上下の辺に詰め込まれて記号どうしが重なっていた(指示線も交差していた)。
+    // そこで、モデル(と寸法)を囲む四角形の外側に、上の行・下の行・左の列・右の列の4つの並びを作り
+    // (四隅は空ける)、それぞれの並びの中では記号どうしのすき間を等しくする。
+    //  1. 各記号を、指している点から近く、モデルの上を通らない並びへ割り振る(並びに入りきらないときは、次に良い並びへ。
+    //     どこにも入らないときは、外側にもう1周の並びを作る)
+    //  2. 並びの中では、指している点の位置の順に並べる(指示線が交差しない順)
+    //  3. それでも交差・かぶりが残るときは、隣どうしの順番を入れ替えて無くす
     {
       const RT0 = performance.now();
       const n = items.length;
-      const maxW = Math.max(...items.map((it) => it.g.w)), maxH = Math.max(...items.map((it) => it.g.h));
-      // 囲む範囲: モデル・寸法値・寸法線・寸法補助線・指している点
+      const GMIN = 8; // 記号どうしの最小のすき間(px)
       let bx0 = mx0, bx1 = mx1, by0 = my0, by1 = my1;
       const addPt = (x, y) => { if (!isFinite(x) || !isFinite(y)) return; if (x < bx0) bx0 = x; if (x > bx1) bx1 = x; if (y < by0) by0 = y; if (y > by1) by1 = y; };
       for (const d of dimRects) { addPt(d.x0, d.y0); addPt(d.x1, d.y1); }
@@ -22254,66 +22258,190 @@ pmi._lineFarPoint = null;
       };
       const rectAtC = (it, C) => ({ x0: C.x - it.g.w / 2, x1: C.x + it.g.w / 2, y0: C.y - it.g.h / 2, y1: C.y + it.g.h / 2 });
       const onM = (x, y) => { const gx = Math.floor(x / CS), gy = Math.floor(y / CS); return gx >= 0 && gy >= 0 && gx < GW && gy < GH && mGrid[gy * GW + gx] === 1; };
-      // 指示線がモデルを貫通する長さ(px)。指している点からモデルの外へ出るまでの1区間は、指すために必要なので数えない。
-      // いったん外へ出たあと、またモデルの上を通る長さを数える
       const pierce = (O, S) => {
         const L = Math.hypot(S.x - O.x, S.y - O.y), nn = Math.max(1, Math.ceil(L / 3));
         let out = false, len = 0;
-        for (let k = 1; k < nn; k++) {
-          const on = onM(O.x + (S.x - O.x) * k / nn, O.y + (S.y - O.y) * k / nn);
-          if (!on) out = true; else if (out) len += L / nn;
-        }
+        for (let k = 1; k < nn; k++) { const on = onM(O.x + (S.x - O.x) * k / nn, O.y + (S.y - O.y) * k / nn); if (!on) out = true; else if (out) len += L / nn; }
         return len;
       };
-      // 四角形(番号・記号の中心が乗る線)を作り、使える所(画面の中・部品表などに重ならない所)に等間隔の位置を用意する
-      const makeSlots = (gap, phase) => {
-        const F = {
-          x0: Math.max(left0 + maxW / 2 + 2, bx0 - gap - maxW / 2), x1: Math.min(right0 - maxW / 2 - 2, bx1 + gap + maxW / 2),
-          y0: Math.max(top0 + maxH / 2 + 2, by0 - gap - maxH / 2), y1: Math.min(bottom0 - maxH / 2 - 2, by1 + gap + maxH / 2),
-        };
-        if (!(F.x1 > F.x0) || !(F.y1 > F.y0)) return null;
-        const W = F.x1 - F.x0, H = F.y1 - F.y0, P = 2 * (W + H);
-        const at = (t) => { // 左上から時計回り
-          t = ((t % P) + P) % P;
-          if (t < W) return { x: F.x0 + t, y: F.y0 };
-          if (t < W + H) return { x: F.x1, y: F.y0 + (t - W) };
-          if (t < 2 * W + H) return { x: F.x1 - (t - W - H), y: F.y1 };
-          return { x: F.x0, y: F.y1 - (t - 2 * W - H) };
-        };
-        const STEPP = 2, ok = [];
-        const probe = { g: { w: maxW, h: maxH } };
-        for (let t = 0; t < P; t += STEPP) { const R = rectAtC(probe, at(t)); ok.push(!banned.some((b2) => ov(R, b2, 2))); }
-        const U = ok.reduce((a2, v) => a2 + (v ? STEPP : 0), 0);
-        if (U <= 0) return null;
-        const d = U / n, pos = [];
-        let acc = 0, want = d * (phase || 0.5), ti = 0;
-        for (let t = 0; t < P && pos.length < n; t += STEPP, ti++) {
-          if (!ok[ti]) continue;
-          acc += STEPP;
-          if (acc >= want) { pos.push(at(t)); want += d; }
-        }
-        while (pos.length < n) pos.push(at(0));
-        // 隣どうしの記号が重ならない間隔か(辺に沿った向きの大きさで比べる)
-        const need = Math.max(maxW, maxH) + 8;
-        return { F, pos, d, fits: d >= need };
-      };
-      let SL = null;
-      function better(a2, b2) { return a2.cr !== b2.cr ? a2.cr < b2.cr : (Math.abs(a2.pl - b2.pl) > 1 ? a2.pl < b2.pl : a2.cs < b2.cs - 1e-6); }
-      let gapUse = 18;
-      for (let gap = 18; gap <= 600; gap += 24) { const s0 = makeSlots(gap, 0.5); if (!s0) break; SL = s0; gapUse = gap; if (s0.fits) break; }
-      // 等間隔の位置を四角形に沿って少しずつずらした並べ方(8通り)を試し、交差・貫通が少なく指示線が短いものを使う
-      let best = null;
-      for (let ph = 0; ph < 8 && SL; ph++) {
-        const SLp = ph === 0 ? SL : makeSlots(gapUse, (ph + 0.5) / 8 + 0.0);
-        if (!SLp) continue;
-        const r = assignSlots(SLp);
-        if (r && (!best || better(r.score, best.score))) best = Object.assign(r, { SL: SLp });
+      // 左右の、上から下まで続く欄(サブアセンブリの欄・縦長の部品表など)は、列を置けない所として除いて考える
+      let fx0 = left0, fx1 = right0;
+      for (const b2 of banned) {
+        if (b2.x1 - b2.x0 > cw * 0.8) continue; // リボン(上の帯)
+        const spanY = Math.min(b2.y1, bottom0) - Math.max(b2.y0, top0);
+        if (spanY < (bottom0 - top0) * 0.5) continue;
+        if ((b2.x0 + b2.x1) / 2 < cw / 2) fx0 = Math.max(fx0, b2.x1); else fx1 = Math.min(fx1, b2.x0);
       }
-      if (best) {
-        const slots = best.SL.pos; SL = best.SL;
-        let as = best.as, cur = best.score;
-        for (let i = 0; i < n; i++) { const it = items[i], C = slots[as[i]]; it.C = { x: C.x, y: C.y }; it.S = startAt(it, it.C); it.bend = null; it.kind = 'Q'; }
-        window.__rectLayout = { n, spacing: SL.d, fits: SL.fits, crossings: cur.cr, pierce: Math.round(cur.pl), ms: Math.round(performance.now() - RT0) };
+      // 並びの線上の区間から、置けない所(部品表など)を除いた一番長い区間
+      const freeSpan = (horiz, lineLo, lineHi, a0, a1) => { // horiz: 行(x方向の区間)。lineLo..lineHi: 並びの帯の厚み
+        let segs = [[a0, a1]];
+        for (const b2 of banned) {
+          const hitBand = horiz ? (b2.y1 > lineLo && b2.y0 < lineHi) : (b2.x1 > lineLo && b2.x0 < lineHi);
+          if (!hitBand) continue;
+          const c0 = horiz ? b2.x0 : b2.y0, c1 = horiz ? b2.x1 : b2.y1;
+          const nx = [];
+          for (const [s0, s1] of segs) { if (c1 <= s0 || c0 >= s1) { nx.push([s0, s1]); continue; } if (c0 > s0) nx.push([s0, c0]); if (c1 < s1) nx.push([c1, s1]); }
+          segs = nx;
+        }
+        let best = null;
+        for (const sg of segs) if (!best || sg[1] - sg[0] > best[1] - best[0]) best = sg;
+        return best && best[1] - best[0] > 10 ? best : null;
+      };
+      const rowH = Math.max(...items.map((it) => it.g.h)), colW = Math.max(...items.map((it) => it.g.w));
+      // 並び(lane): { side:'T'|'B'|'L'|'R', ring, horiz, line(記号の内側の辺の位置), a0,a1(区間), members }
+      const makeLanes = (gap) => {
+        const F = { x0: bx0 - gap, x1: bx1 + gap, y0: by0 - gap, y1: by1 + gap };
+        F.x0 = Math.max(F.x0, fx0 + colW + 4); F.x1 = Math.min(F.x1, fx1 - colW - 4);
+        F.y0 = Math.max(F.y0, top0 + rowH + 2); F.y1 = Math.min(F.y1, bottom0 - rowH - 2);
+        if (!(F.x1 > F.x0 + 20) || !(F.y1 > F.y0 + 20)) return null;
+        const lanes = [];
+        for (let ring = 0; ring < 3; ring++) {
+          const dyR = ring * (rowH + 14), dxR = ring * (colW + 14);
+          const tY = F.y0 - dyR, bY = F.y1 + dyR, lX = F.x0 - dxR, rX = F.x1 + dxR;
+          const add = (side, horiz, line, lo, hi, a0, a1) => { const sp = freeSpan(horiz, lo, hi, a0, a1); if (sp) lanes.push({ side, ring, horiz, line, a0: sp[0], a1: sp[1], members: [] }); };
+          if (tY - rowH >= top0) add('T', true, tY, tY - rowH, tY, F.x0, F.x1);
+          if (bY + rowH <= bottom0) add('B', true, bY, bY, bY + rowH, F.x0, F.x1);
+          if (lX - colW >= fx0) add('L', false, lX, lX - colW, lX, F.y0, F.y1);
+          if (rX + colW <= fx1) add('R', false, rX, rX, rX + colW, F.y0, F.y1);
+        }
+        return { F, lanes };
+      };
+      const sizeIn = (it, ln) => ln.horiz ? it.g.w : it.g.h;
+      const used = (ln) => ln.members.reduce((a2, it) => a2 + sizeIn(it, ln), 0) + (ln.members.length + 1) * GMIN;
+      // 並びの中の位置(すき間を等しくする)。順番は members の順
+      const placeLane = (ln) => {
+        const L = ln.a1 - ln.a0, tot = ln.members.reduce((a2, it) => a2 + sizeIn(it, ln), 0);
+        const g = Math.max(2, (L - tot) / (ln.members.length + 1));
+        let p = ln.a0 + g;
+        for (const it of ln.members) {
+          const sz = sizeIn(it, ln), c = p + sz / 2;
+          if (ln.side === 'T') it.C = { x: c, y: ln.line - it.g.h / 2 };
+          else if (ln.side === 'B') it.C = { x: c, y: ln.line + it.g.h / 2 };
+          else if (ln.side === 'L') it.C = { x: ln.line - it.g.w / 2, y: c };
+          else it.C = { x: ln.line + it.g.w / 2, y: c };
+          it.S = startAt(it, it.C); it.bend = null; it.kind = 'Q'; it._lane = ln;
+          p += sz + g;
+        }
+      };
+      // 指している点から並びへの近さ(並びの上の一番近い点まで)+ モデルの上を通る重み + 外側の周ほど少し重く
+      const laneCost = (it, ln) => {
+        const a = Math.max(ln.a0, Math.min(ln.a1, ln.horiz ? it.O.x : it.O.y));
+        let C;
+        if (ln.side === 'T') C = { x: a, y: ln.line - it.g.h / 2 }; else if (ln.side === 'B') C = { x: a, y: ln.line + it.g.h / 2 };
+        else if (ln.side === 'L') C = { x: ln.line - it.g.w / 2, y: a }; else C = { x: ln.line + it.g.w / 2, y: a };
+        const S = startAt(it, C);
+        return Math.hypot(S.x - it.O.x, S.y - it.O.y) + pierce(it.O, S) * 40 + ln.ring * 250;
+      };
+      let LY = null;
+      for (let gap = 18; gap <= 400; gap += 30) {
+        const ly = makeLanes(gap);
+        if (!ly) break;
+        const cap = ly.lanes.filter((l) => l.ring === 0).reduce((a2, l) => a2 + (l.a1 - l.a0), 0);
+        const need = items.reduce((a2, it) => a2 + Math.min(it.g.w, it.g.h) + GMIN, 0);
+        LY = ly;
+        if (cap >= need * 1.6) break; // 1周目にゆとりを持って入る大きさまで広げる
+      }
+      if (LY && LY.lanes.length) {
+        const lanes = LY.lanes;
+        // 1. 割り振り(迷いの大きいものから先に、一番良い並びへ。入りきらなければ次に良い並び)
+        const prefs = items.map((it) => lanes.map((ln, li) => ({ li, c: laneCost(it, ln) })).sort((p1, p2) => p1.c - p2.c));
+        const order = items.map((_, i) => i).sort((i, j) => {
+          const ri = (prefs[i][1] ? prefs[i][1].c : 1e9) - prefs[i][0].c, rj = (prefs[j][1] ? prefs[j][1].c : 1e9) - prefs[j][0].c;
+          return rj - ri;
+        });
+        const overflow = [];
+        for (const i of order) {
+          const it = items[i];
+          let ok = false;
+          for (const pf of prefs[i]) {
+            const ln = lanes[pf.li];
+            if (used(ln) + sizeIn(it, ln) + GMIN <= ln.a1 - ln.a0) { ln.members.push(it); ok = true; break; }
+          }
+          if (!ok) overflow.push(it);
+        }
+        // 入りきらないものは、一番良い並びに詰める(すき間は狭くなる)
+        for (const it of overflow) lanes[prefs[items.indexOf(it)][0].li].members.push(it);
+        // 2. 並びの中は、指している点の位置の順
+        for (const ln of lanes) { ln.members.sort((p1, p2) => (ln.horiz ? p1.O.x - p2.O.x : p1.O.y - p2.O.y)); placeLane(ln); }
+        // 2b. 決まった置き場所の組をそのまま使い、どれをどこに置くかを、指示線の長さの合計が最小になる組み合わせ
+        // (ハンガリアン法)で選び直す。長さの合計が最小の組み合わせでは、指示線どうしは交差しない。
+        // 並びの大きさに入りきらない記号(幅の広い溶接記号を縦の列へ、など)は選ばない
+        {
+          const P = items.map((it) => ({ C: it.C, ln: it._lane, a: it._lane.horiz ? it.C.x : it.C.y, sz: sizeIn(it, it._lane) }));
+          const cost = items.map((it) => P.map((pp) => {
+            const S = startAt(it, pp.C);
+            const big = sizeIn(it, pp.ln) > pp.sz + 6 ? 1e6 : 0;
+            return Math.hypot(S.x - it.O.x, S.y - it.O.y) + big;
+          }));
+          let as = null;
+          try { as = hungarianAssign(cost, n, n); } catch (e) { as = null; }
+          if (as) {
+            for (const ln of lanes) ln.members = [];
+            const byLane = new Map();
+            for (let i = 0; i < n; i++) { const pp = P[as[i]]; if (!byLane.has(pp.ln)) byLane.set(pp.ln, []); byLane.get(pp.ln).push({ it: items[i], a: pp.a }); }
+            for (const [ln, arr] of byLane) { arr.sort((p1, p2) => p1.a - p2.a); ln.members = arr.map((e) => e.it); }
+            for (const ln of lanes) placeLane(ln);
+          }
+        }
+        // 3. 交差・かぶりが残るものは、隣どうしの順番を入れ替える
+        const badPair = (A, B) => leaderSegsConflict(A.S, A.O, B.S, B.O) || segTouchesRect(A.S, A.O, rectAtC(B, B.C), 2) || segTouchesRect(B.S, B.O, rectAtC(A, A.C), 2) || ov(rectAtC(A, A.C), rectAtC(B, B.C), 1);
+        const badOf = (A) => { let c2 = 0; for (const B of items) if (B !== A && badPair(A, B)) c2++; return c2; };
+        let total = 0; for (let i = 0; i < n; i++) for (let k = i + 1; k < n; k++) if (badPair(items[i], items[k])) total++;
+        for (let pass = 0; pass < 60 && total > 0 && performance.now() - RT0 < 220; pass++) {
+          let improved = false;
+          for (const ln of lanes) {
+            for (let q = 0; q + 1 < ln.members.length; q++) {
+              const A = ln.members[q], B = ln.members[q + 1];
+              const before = badOf(A) + badOf(B) - (badPair(A, B) ? 1 : 0);
+              ln.members[q] = B; ln.members[q + 1] = A; placeLane(ln);
+              const after = badOf(A) + badOf(B) - (badPair(A, B) ? 1 : 0);
+              if (after < before) { total += after - before; improved = true; }
+              else { ln.members[q] = A; ln.members[q + 1] = B; placeLane(ln); }
+            }
+          }
+          // 交差・かぶりが残る記号は、ほかの記号(別の並びのものも)と置き場所を入れ替えて試す
+          if (!improved) {
+            const totalNow = () => { let t2 = 0; for (let i = 0; i < n; i++) for (let k = i + 1; k < n; k++) if (badPair(items[i], items[k])) t2++; return t2; };
+            outer: for (const A of items) {
+              if (!badOf(A)) continue;
+              for (const B of items) {
+                if (B === A) continue;
+                if (performance.now() - RT0 > 220) break outer;
+                const la = A._lane, lb = B._lane, ia = la.members.indexOf(A), ib = lb.members.indexOf(B);
+                la.members[ia] = B; lb.members[ib] = A;
+                const fits = used(la) <= la.a1 - la.a0 && used(lb) <= lb.a1 - lb.a0;
+                placeLane(la); if (lb !== la) placeLane(lb);
+                const t2 = fits ? totalNow() : Infinity;
+                if (t2 < total) { total = t2; improved = true; break outer; }
+                la.members[ia] = A; lb.members[ib] = B; placeLane(la); if (lb !== la) placeLane(lb);
+              }
+            }
+          }
+          // 並びをまたいだ交差は、その記号を隣の並び(同じ周の別の辺・外側の周)へ移して試す
+          if (!improved) {
+            for (const A of items) {
+              if (!badOf(A)) continue;
+              const from = A._lane;
+              for (const pf of prefs[items.indexOf(A)]) {
+                const ln = lanes[pf.li];
+                if (ln === from || used(ln) + sizeIn(A, ln) + GMIN > ln.a1 - ln.a0) continue;
+                const before = total;
+                from.members.splice(from.members.indexOf(A), 1); ln.members.push(A);
+                ln.members.sort((p1, p2) => (ln.horiz ? p1.O.x - p2.O.x : p1.O.y - p2.O.y));
+                placeLane(from); placeLane(ln);
+                let t2 = 0; for (let i = 0; i < n; i++) for (let k = i + 1; k < n; k++) if (badPair(items[i], items[k])) t2++;
+                if (t2 < before) { total = t2; improved = true; break; }
+                ln.members.splice(ln.members.indexOf(A), 1); from.members.push(A);
+                from.members.sort((p1, p2) => (from.horiz ? p1.O.x - p2.O.x : p1.O.y - p2.O.y));
+                placeLane(from); placeLane(ln);
+              }
+              if (improved || performance.now() - RT0 > 220) break;
+            }
+          }
+          if (!improved) break;
+        }
+        let pl = 0; for (const it of items) pl += pierce(it.O, it.S);
+        window.__rectLayout = { n, lanes: lanes.filter((l) => l.members.length).map((l) => l.side + l.ring + ':' + l.members.length).join(' '), conflicts: total, overflow: overflow.length, pierce: Math.round(pl), ms: Math.round(performance.now() - RT0) };
         if (!moving) perimFullSinceMove = true;
         perimBendJob = null;
         perimMatchCache = { key, mv: moving, C: new Map(items.map((it) => [it.p.id, it.C])), B: new Map() };
@@ -22321,54 +22449,6 @@ pmi._lineFarPoint = null;
         window.__perimMs = performance.now() - T0;
         apply();
         return;
-      }
-      function assignSlots(SLx) {
-        const AT0 = performance.now();
-        const slots = SLx.pos;
-        // 重み: 指示線の長さ + 貫通(大きな重み) + 寸法値の上を通る
-        const cost = [], pc = [];
-        for (let i = 0; i < n; i++) {
-          const it = items[i], row = [], prow = [];
-          for (let j = 0; j < n; j++) {
-            const C = slots[j], S = startAt(it, C);
-            const pl = pierce(it.O, S);
-            let c = Math.hypot(S.x - it.O.x, S.y - it.O.y) + pl * 60;
-            if (dimRects.some((dr) => segTouchesRect(S, it.O, dr, 1))) c += 400;
-            row.push(c); prow.push(pl);
-          }
-          cost.push(row); pc.push(prow);
-        }
-        let as = null;
-        try { as = hungarianAssign(cost, n, n); } catch (e) { as = null; }
-        if (!as) as = Int32Array.from(items.map((_, i) => i));
-        const segOf = (i, j) => { const C = slots[j]; return { S: startAt(items[i], C), O: items[i].O, R: rectAtC(items[i], C) }; };
-        // 交差・かぶり(指示線どうしの交差、指示線がほかの記号にかかる)の数
-        const badPair = (i, ji, k, jk) => {
-          const A = segOf(i, ji), B = segOf(k, jk);
-          return leaderSegsConflict(A.S, A.O, B.S, B.O) || segTouchesRect(A.S, A.O, B.R, 2) || segTouchesRect(B.S, B.O, A.R, 2);
-        };
-        const crossOf = (i, ji, A) => { let c2 = 0; for (let k = 0; k < n; k++) if (k !== i && badPair(i, ji, k, A[k])) c2++; return c2; };
-        const totalScore = (A) => {
-          let cr = 0, pl = 0, cs = 0;
-          for (let i = 0; i < n; i++) { pl += pc[i][A[i]]; cs += cost[i][A[i]]; for (let k = i + 1; k < n; k++) if (badPair(i, A[i], k, A[k])) cr++; }
-          return { cr, pl, cs };
-        };
-        let cur = totalScore(as);
-        // 入れ替え: 交差しているものを中心に、置き場所の入れ替えで良くなるものを探す(時間の上限あり)
-        for (let iter = 0; iter < 400 && cur.cr > 0 && performance.now() - AT0 < 40; iter++) {
-          let improved = false;
-          for (let i = 0; i < n && !improved; i++) {
-            if (!crossOf(i, as[i], as)) continue;
-            for (let k = 0; k < n && !improved; k++) {
-              if (k === i) continue;
-              const A2 = Int32Array.from(as); const t2 = A2[i]; A2[i] = A2[k]; A2[k] = t2;
-              const sc = totalScore(A2);
-              if (better(sc, cur)) { as = A2; cur = sc; improved = true; }
-            }
-          }
-          if (!improved) break;
-        }
-        return { as, score: cur };
       }
     }
     // 置き場所(枠)を用意する。枠は細かい間隔(FINE px)で用意し、割り当てたあとで等間隔に詰める
