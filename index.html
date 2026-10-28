@@ -991,6 +991,7 @@
   @media (prefers-reduced-motion: reduce) {
     * { transition: none !important; }
   }
+  html.step-file-dragging #glcanvas { outline: 3px dashed #54b5ff; outline-offset: -8px; }
 </style>
 </head>
 <body>
@@ -1136,6 +1137,7 @@
           <span class="size-slider-label"><span>溶接記号のサイズ</span><span class="size-slider-value" id="weldSizeValue">—</span></span>
           <input type="range" id="weldSizeSlider" min="10" max="300" step="1">
         </label>
+        <button type="button" id="resetPmiSizesBtn" class="btn btn-ghost-label" title="寸法・注記・溶接記号を起動時のサイズに戻す" style="align-self:flex-start; margin-top:5px;">初期サイズに戻す</button>
       </div>
       <span class="ribbon-group-label">サイズ調整</span>
     </div>
@@ -1171,7 +1173,7 @@
        ファイルではなく古い表示のままのタブ/キャッシュを見ていることが原因
        なため)。オフラインApp版ではsw.jsのCACHE_VERSIONと、単体HTML版では
        ビルド日時と、必ず同じ値にそろえて更新すること。 -->
-  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v649</div>
+  <div id="buildBadge" style="position:fixed; left:10px; bottom:8px; z-index:60; font-size:10.5px; font-family:var(--font-mono); color:rgba(255,255,255,0.32); pointer-events:none; user-select:none;">build v660</div>
   <!-- v542: 座標軸の向きの表示(SOLIDWORKSの参照トライアドと同様)。モデルと一緒に回り、
        X(赤)・Y(緑)・Z(青)がいまどちらを向いているかを示す。座標はSTEPファイル(CAD)の座標系。 -->
   <svg id="axisTriad" width="96" height="96" viewBox="-48 -48 96 96" aria-hidden="true"
@@ -1319,6 +1321,7 @@
       <p>これは、実際にアップロードされたSTEP AP242ファイル（<span id="aboutFileName" style="font-family:var(--font-mono)">—</span>）から直接抽出した、<strong>実データのPMI（寸法・注記）とソリッド形状（陰影表示）</strong>を同じ実座標系で3D空間に表示するビューアです。</p>
       <p>ジェスチャ（1本指回転・2本指ズーム/パン・タップ選択）、PMIの強調表示、情報パネルはすべてこのファイルの実座標・実テキストに基づいて動作します。</p>
       <ul>
+        <li>v660: 一斉表示の指示線を短くしました。四角形の周に全部を均等に配るのをやめ、記号の数より多めに置き場所を用意して、ハンガリアン法で指している点に近い置き場所を選びます。上下の行は記号の幅、左右の列は記号の高さで置き場所を取り(一番大きい記号に合わせて四角形を広げない)、各辺の中では順番を変えずに記号どうしのすき間を同じ間隔に詰め、記号のモデル側の縁を四角形の線にそろえます。四角形は重ならずに並べられる一番小さい大きさにします。また、サブアセンブリの中の個別の配管(部品)を選んだときも、その配管に関連する指示(指示線・寸法補助線の先がその配管に触れている寸法・照合番号・溶接記号など。継手との継ぎ目の溶接記号も含みます)を表示するようにしました。</li>
         <li>v649: 一斉表示の並びを常に1つの四角形にしました。部品表・サブアセンブリの欄・リボンが出ているときも、欄の所を飛ばすのではなく、四角形そのものを欄の手前までにします(並びに切れ目を作りません)。また、寸法・注記・溶接記号のサイズを変えたときは、四角形の大きさ・記号どうしの間隔を自動で取り直します。</li>
         <li>v648: 一斉表示で番号・記号が1周の四角形に入りきらないとき、記号を小さくする前に、四角形の内側にもう1周作って2周の上にそれぞれ等間隔で並べるようにしました(外側への指示線が内側の記号のあいだを通るよう、半分ずらして置きます)。記号を縮める下限を30%から50%に上げ(v649で40%)、縮めるのは記号どうしが実際に重なるときだけにしました(重ならなければ元の大きさのまま)。部品表などの欄の横は、四角形をその手前で止めるか欄の所だけ飛ばすかを、並べられる長さが長い方で選びます。</li>
         <li>v647: 一斉表示を、モデル(と寸法)を囲む1つのきれいな四角形の周の上に、すべての番号・記号を同じ間隔で並べる方式にしました。どれをどこに置くかは、指している点と記号の中心の距離の合計が一番短くなる組み合わせをハンガリアン法で求めます(この組み合わせでは指示線どうしは交差しません)。四角形は、隣どうしの記号が重ならない間隔になる大きさまで広げます(画面の中で、部品表などは避けます)。</li>
@@ -9275,6 +9278,8 @@
   let occBoxes = [];           // オカレンスごとの外形(min/max)
   let pmiOwners = new Map();   // pmi.id -> 属するオカレンス番号の配列
   let pmiOwnerHow = new Map(); // pmi.id -> 'plane'(注記面の名前) | 'geom'(形状との接触)
+  let pmiRelLeaves = new Map(); // v660: pmi.id -> 指示線・寸法補助線の先が触れている部品(末端のオカレンス)の集合(個別の部品を選んだとき用)
+  let occLeafList = [];         // v660: 末端のオカレンス(部品)の番号
 
   function deleteLineBuffer(lineData) {
     if (gl && lineData && lineData.buffer) gl.deleteBuffer(lineData.buffer);
@@ -9930,7 +9935,7 @@
   // せず、両方を正しい大きさ比のまま表示できる(about-panelの解説も参照)。
   // v96: 「寸法の文字サイズ」スライダー(SLIDER_DIMENSION_MIN/MAX参照)で
   // ユーザーが実行時に変更できるよう、以前はconstだったのをletに変更した。
-  let GLYPH_TARGET_RADIUS = 45; // mm(拡大後に目指すだいたいの半径)
+  let GLYPH_TARGET_RADIUS = 67.5; // mm(拡大後に目指すだいたいの半径)
   // v96: 溶接記号の実図形(bodyTris)は、上と同じ目標半径で拡大すると
   // パイプ径に対してかなり大きく見えすぎるとユーザーから指摘があったため
   // (v55)、溶接記号だけは別の(より小さい)目標半径を使っていた。この値は
@@ -9949,7 +9954,7 @@
   // 外側へ広がる分だけアイコンから離れて見えてしまう。旗アイコンの目標
   // 半径(WELD_ICON_TARGET_RADIUS=15mm)に近づけることで、写真のように
   // アイコンのすぐ横に収まるようにした。
-  let WELD_TEXT_TARGET_RADIUS = 20; // mm(溶接記号の実文字・記号本体だけの目標半径。ユーザーがスライダーで調整すると変わる)
+  let WELD_TEXT_TARGET_RADIUS = 30; // mm(溶接記号の実文字・記号本体だけの目標半径。ユーザーがスライダーで調整すると変わる)
   // v60: 部品表アイテム番号のような小さな単独の参照バルーン注記
   // (noteSmallGlyph)は、v58で上のWELD_GLYPH_TARGET_RADIUSと同じ目標半径
   // まで拡大する扱いにしたが、実際にパイプ脇に表示された画像で確認した
@@ -9985,7 +9990,7 @@
   // v96: 上のGLYPH_TARGET_RADIUSと同じく、letに変更してスライダーで実行時
   // に変更できるようにした。v97でユーザー指示により「注記の文字サイズ」
   // として寸法とは独立したスライダーに分離した(SLIDER_NOTE_MIN/MAX参照)。
-  let NOTE_SMALL_GLYPH_TARGET_RADIUS = 10; // mm(noteSmallGlyphの注記だけ、溶接記号よりさらに小さい目標半径)
+  let NOTE_SMALL_GLYPH_TARGET_RADIUS = 15; // mm(noteSmallGlyphの注記だけ、溶接記号よりさらに小さい目標半径)
   // v59: モデル側の指示点(引出線の反対端に近い側、WELD_LIKE_CLUSTER_MAX
   // 判定でfixedTris側に分類されるかたまり)は、パイプ表面に直接乗っている
   // ため、タグ側の記号・文字と同じ目標半径まで拡大すると丸く大きな塊に
@@ -11530,6 +11535,8 @@
   function computePmiOwnership() {
     pmiOwners = new Map();
     pmiOwnerHow = new Map();
+    pmiRelLeaves = new Map(); // v660
+    occLeafList = [];
     if (!occNodes.length || !modelAllTris) return;
     computeOccBoxes();
     const leaves = [];
@@ -11538,6 +11545,7 @@
     }
     leafOfTri = new Int32Array(modelAllTris.length / 9).fill(-1);
     for (const i of leaves) leafOfTri.fill(i, occNodes[i].triStart, occNodes[i].triEnd);
+    occLeafList = leaves; // v660
     // 注記面の名前で照合する相手は、サブアセンブリ(最上位以外で子を持つもの)
     const asm = [];
     for (let i = 0; i < occNodes.length; i++) {
@@ -12084,6 +12092,67 @@
     if (!owners) return false;
     return owners.some((o) => isOccWithin(o, idx));
   }
+  // v660: 「個別の配管を選択しても関連する指示が表示されるように」との要望。
+  // これまでの振り分け(pmiOwners)は、端点ごとに一番近い部品1つだけを数えていたため、配管と継手の継ぎ目の
+  // 溶接記号や、端の片方だけが配管に触れている寸法などは、配管を選んでも出なかった。そこで、モデルに
+  // 触れている端点(一番近い端点と同程度に近いもの)ごとに、その点から REL_MM 以内に表面がある部品を
+  // すべて「関連する部品」とする(初めて必要になったときに求めて覚えておく)。
+  function pmiRelatedLeafSet(pmi) {
+    let set = pmiRelLeaves.get(pmi.id);
+    if (set) return set;
+    set = new Set();
+    pmiRelLeaves.set(pmi.id, set);
+    const owners = pmiOwners.get(pmi.id);
+    if (owners) for (const o of owners) if (occNodes[o] && occNodes[o].childCount === 0) set.add(o);
+    const tris = modelAllTris;
+    if (!tris || !leafOfTri || !occLeafList.length) return set;
+    const MAX_TOUCH_MM = 80, TOUCH_SLACK_MM = 3, REL_MM = 2.5;
+    const cand = pmi._subOcc != null ? occLeafList.filter((l) => isOccWithin(l, pmi._subOcc)) : occLeafList;
+    if (!cand.length) return set;
+    const mask = leafMaskFor(cand);
+    let pts = [];
+    for (const pl of (pmi._nativeLines || pmi.lines || [])) {
+      if (!pl || !pl.length) continue;
+      pts.push(pl[0]);
+      if (pl.length > 1) pts.push(pl[pl.length - 1]);
+    }
+    if (!pts.length && pmi.anchor) pts.push(pmi.anchor);
+    if (pmi.asRecorded && pts.length > 24 && pmi.anchor) {
+      const a = pmi.anchor;
+      pts.sort((p, q) => Math.hypot(q[0] - a[0], q[1] - a[1], q[2] - a[2]) - Math.hypot(p[0] - a[0], p[1] - a[1], p[2] - a[2]));
+      pts.length = 24;
+    }
+    const near = [];
+    for (const q of pts) { const r = nearestLeafOcc(q, cand, MAX_TOUCH_MM); if (r) near.push({ q, d: r.dist }); }
+    if (!near.length) return set;
+    const minD = Math.min(...near.map((r) => r.d));
+    for (const r of near) {
+      if (r.d > minD + TOUCH_SLACK_MM) continue;
+      const lim = r.d + REL_MM, got = new Set();
+      for (let k = 0; k < 6; k++) {
+        const nt = nearestTriangleWhere(tris, r.q, lim * lim, (t) => { const o = leafOfTri[t]; return o >= 0 && mask[o] === 1 && !got.has(o); });
+        if (!nt) break;
+        got.add(leafOfTri[nt.t]);
+      }
+      for (const o of got) set.add(o);
+    }
+    return set;
+  }
+  function pmiRelatedToOcc(pmi, idx) {
+    if (!occNodes[idx]) return false;
+    for (const o of pmiRelatedLeafSet(pmi)) if (isOccWithin(o, idx)) return true;
+    return false;
+  }
+  // v660: 選んでいるのが個別の部品(配管など、子を持たない末端)か
+  function occIsLeafPart(idx) {
+    return idx >= 0 && !!occNodes[idx] && occNodes[idx].parent >= 0 && occNodes[idx].childCount === 0;
+  }
+  // v660: その部品が、サブアセンブリのSTEPが対応づいている範囲の中にあるか
+  function occCoveredBySubStep(idx) {
+    if (!subStepsLoaded()) return false;
+    for (const o of subStepByOcc.keys()) if (isOccWithin(idx, o)) return true;
+    return false;
+  }
   // サブアセンブリ選択によるPMIの絞り込み(isCategoryVisibleから呼ばれる)
   function occPmiVisible(pmi) {
     // v415: サブアセンブリのSTEPから来たPMIは、そのサブアセンブリ(またはその中の
@@ -12091,7 +12160,8 @@
     // 最上位を選んでいるときは、親のSTEPのPMIだけを表示する。
     if (pmi._subOcc != null) {
       if (occSelected < 0 || !occNodes.length || occNodes[occSelected].parent < 0 || occView === 'all') return false; // v558
-      return pmiBelongsToOcc(pmi, occSelected);
+      if (pmiBelongsToOcc(pmi, occSelected)) return true;
+      return occIsLeafPart(occSelected) && pmiRelatedToOcc(pmi, occSelected); // v660: 個別の配管に関連する指示
     }
     if (occSelected < 0 || !occPmiOnlySelected || !occNodes.length) return true;
     if (occNodes[occSelected].parent < 0) return true; // 最上位を選んでいるときは全部
@@ -12100,8 +12170,11 @@
     // v422: サブアセンブリのSTEPを読み込んでいるときは、サブアセンブリ(またはその中の
     // 部品)を選んでいる間、親アセンブリのSTEPに乗っているPMIは一切表示しない
     // (サブアセンブリのSTEPに乗っているPMIだけを表示する)。
-    if (subStepsLoaded()) return false;
-    return pmiBelongsToOcc(pmi, occSelected);
+    // v660: 個別の部品(配管など)を選んだときは、その部品がサブアセンブリのSTEPの範囲の中にあるときだけ
+    // 親のPMIを隠す(範囲の外の部品なら、親のSTEPのPMIのうち、その部品に関連するものを表示する)
+    const leafSel = occIsLeafPart(occSelected);
+    if (subStepsLoaded() && !(leafSel && !occCoveredBySubStep(occSelected))) return false;
+    return pmiBelongsToOcc(pmi, occSelected) || (leafSel && pmiRelatedToOcc(pmi, occSelected));
   }
   // v422: フォルダ読み込みで、サブアセンブリのSTEPが1つ以上対応づいているか
   function subStepsLoaded() {
@@ -12113,10 +12186,11 @@
   }
   function occPmiCounts(idx) {
     const c = { dimension: 0, note: 0, weld: 0, total: 0 };
+    const leafSel = occIsLeafPart(idx), leafOutside = leafSel && !occCoveredBySubStep(idx); // v660
     for (const pmi of pmiList) {
-      if (!pmiBelongsToOcc(pmi, idx)) continue;
+      if (!pmiBelongsToOcc(pmi, idx) && !(leafSel && pmiRelatedToOcc(pmi, idx))) continue;
       // v422: 親のSTEPのPMIは表示しないので、件数にも含めない
-      if (pmi._subOcc == null && subStepsLoaded() && occPmiOnlySelected) continue;
+      if (pmi._subOcc == null && subStepsLoaded() && occPmiOnlySelected && !leafOutside) continue;
       c[pmi.category] = (c[pmi.category] || 0) + 1;
       c.total++;
     }
@@ -15500,6 +15574,17 @@
     // 自体もこのスライダーで一緒に拡大・縮小する(refreshAllWeldNotationTags
     // 参照)。
     refreshAllWeldNotationTags();
+  });
+
+  // v654: リボンのサイズ調整を3種類まとめて起動時の初期値に戻す。
+  // 既存のinputイベントを利用して、PMI再描画と全表示の配置キャッシュ更新を統一する。
+  document.getElementById('resetPmiSizesBtn').addEventListener('click', () => {
+    dimensionSizeSlider.value = String(DEFAULT_GLYPH_TARGET_RADIUS);
+    noteSizeSlider.value = String(DEFAULT_NOTE_SMALL_GLYPH_TARGET_RADIUS);
+    weldSizeSlider.value = String(DEFAULT_WELD_TEXT_TARGET_RADIUS);
+    dimensionSizeSlider.dispatchEvent(new Event('input', { bubbles: true }));
+    noteSizeSlider.dispatchEvent(new Event('input', { bubbles: true }));
+    weldSizeSlider.dispatchEvent(new Event('input', { bubbles: true }));
   });
 
   document.getElementById('infoMeasuredInput').addEventListener('input', () => {
@@ -22164,7 +22249,11 @@ pmi._lineFarPoint = null;
       for (const it of items) {
         const p = it.p, el = markerEls.get(p.id);
         // v640: 「PMIを一斉表示」では全部出し続ける。並べる場所が無いものも隠さず、その場の位置のまま出す
-        if (!it.C) { p._perimeterHidden = false; p._perimeterPlaced = false; if (el && !p._guardHidden) el.style.visibility = ''; continue; }
+        if (!it.C) { // v655: 安全な置き場所がない場合は、モデル上に記号を残さない。
+          p._perimeterHidden = true; p._perimeterPlaced = false;
+          if (el) el.style.visibility = 'hidden';
+          continue;
+        }
         if (p._perimeterHidden) { p._perimeterHidden = false; if (el) el.style.visibility = ''; }
         const nx = it.C.x - it.g.offX, ny = it.C.y - it.g.offY;
         p._screen.x = nx; p._screen.y = ny;
@@ -22406,6 +22495,136 @@ pmi._lineFarPoint = null;
         if (s2 && s2.d >= Math.max(needW, needH)) break;
         if (F2.x0 <= lim.x0 && F2.x1 >= lim.x1 && F2.y0 <= lim.y0 && F2.y1 >= lim.y1) break; // 画面いっぱい
       }
+      // v660: 「指示線が長すぎる」への対応。四角形の周に n 個を均等に配る方式(v647〜)では、指している点が
+      // 片側に集まっていても反対側の辺まで記号が配られ、指示線が長くなっていた。また、隣どうしの間隔を
+      // 一番大きい記号(溶接記号など)の幅・高さで決めていたため、四角形が必要以上に大きくなっていた。
+      // そこで、(1) 上下の行は記号の幅、左右の列は記号の高さで置き場所を用意し(四角形を小さくできる)、
+      // (2) 置き場所を記号の数より多めに用意して、ハンガリアン法で「指している点に近い置き場所」を選び、
+      // (3) 各辺の中では、順番を変えずに、記号どうしのすき間がすべて同じ(GEQ)になるように詰め、
+      // (4) 記号のモデル側の縁を四角形の線にそろえる(小さい記号もモデルから離れない)。
+      // 四角形は、これで重なりなく並べられる一番小さい大きさ(から少し大きいものまで比べて一番よいもの)にする。
+      let gridF = null;
+      const gridAlign = (it, side, a, Fr) => side === 'T' ? { x: a, y: Fr.y0 + maxHH - it.gb.y1 } : side === 'B' ? { x: a, y: Fr.y1 - maxHH - it.gb.y0 } : side === 'L' ? { x: Fr.x0 + maxHW - it.gb.x1, y: a } : { x: Fr.x1 - maxHW - it.gb.x0, y: a };
+      const gridLayout = () => {
+        const TG = performance.now();
+        const avgW = items.reduce((a2, it) => a2 + (it.gb.x1 - it.gb.x0), 0) / n, avgH = items.reduce((a2, it) => a2 + (it.gb.y1 - it.gb.y0), 0) / n;
+        const pr = Math.max(16, avgW + GEQ), pc = Math.max(16, avgH + GEQ);
+        const needLen = items.reduce((a2, it) => a2 + Math.min(it.gb.x1 - it.gb.x0, it.gb.y1 - it.gb.y0) + GEQ, 0);
+        const boxBad = (R) => rectOnModel(R) || dimRects.some((d) => ov(R, d, 1)) || dimTouch(R, 1);
+        const inView = (R) => R.x0 >= left0V - 0.5 && R.x1 <= right0V + 0.5 && R.y0 >= top0V - 0.5 && R.y1 <= bottom0V + 0.5;
+        // 順番を保ったまま、すき間 GEQ 以上で、指定の範囲 [lo, hi] に収まる位置のうち、元の位置からのずれ(2乗和)が最小のもの(PAVA)
+        const legalize = (list, lo, hi) => {
+          const K = list.length;
+          if (!K) return [];
+          const c = new Float64Array(K);
+          for (let k = 1; k < K; k++) c[k] = c[k - 1] + list[k - 1].ep + GEQ + list[k].em;
+          const L = lo + list[0].em, U = hi - list[K - 1].ep - c[K - 1];
+          if (L > U + 0.5) return null; // 入りきらない
+          const blocks = [];
+          for (let k = 0; k < K; k++) {
+            blocks.push({ v: list[k].t - c[k], w: 1, n: 1 });
+            while (blocks.length > 1 && blocks[blocks.length - 2].v > blocks[blocks.length - 1].v) {
+              const b = blocks.pop(), a = blocks[blocks.length - 1];
+              a.v = (a.v * a.w + b.v * b.w) / (a.w + b.w); a.w += b.w; a.n += b.n;
+            }
+          }
+          const out = []; let k = 0;
+          for (const b of blocks) { const v = Math.max(L, Math.min(U, b.v)); for (let j = 0; j < b.n; j++, k++) out.push(v + c[k]); }
+          return out;
+        };
+        // own = 'row': 四隅を上下の行が使う(横長のモデル向き) / 'col': 四隅を左右の列が使う(縦長のモデル向き)
+        const tryRect = (Fr, own) => {
+          const W = Fr.x1 - Fr.x0, H = Fr.y1 - Fr.y0;
+          if (!(W > 0 && H > 0)) return null;
+          let cLo, cHi, rLo, rHi;
+          if (own === 'col') {
+            cLo = Math.max(Fr.y0 - maxHH, top0V); cHi = Math.min(Fr.y1 + maxHH, bottom0V);
+            rLo = Math.max(Fr.x0 + maxHW + GEQ, left0V); rHi = Math.min(Fr.x1 - maxHW - GEQ, right0V);
+          } else {
+            cLo = Math.max(Fr.y0 + maxHH + GEQ, top0V); cHi = Math.min(Fr.y1 - maxHH - GEQ, bottom0V);
+            rLo = Math.max(Fr.x0 - maxHW, left0V); rHi = Math.min(Fr.x1 + maxHW, right0V);
+          }
+          if (2 * Math.max(0, rHi - rLo) + 2 * Math.max(0, cHi - cLo) < needLen) return { overflow: true };
+          const slots = [];
+          if (own === 'col') {
+            if (rHi - rLo >= pr * 0.8) {
+              const kr = Math.max(1, Math.floor((rHi - rLo) / pr));
+              for (let k = 0; k < kr; k++) { const x = rLo + (rHi - rLo) * (k + 0.5) / kr; slots.push({ side: 'T', a: x }, { side: 'B', a: x }); }
+            }
+          } else {
+            const kr = Math.max(2, Math.floor(W / pr) + 1);
+            for (let k = 0; k < kr; k++) { const x = Fr.x0 + W * k / (kr - 1); slots.push({ side: 'T', a: x }, { side: 'B', a: x }); }
+          }
+          if (cHi - cLo >= pc * 0.8) {
+            const kc = Math.max(1, Math.floor((cHi - cLo) / pc));
+            for (let k = 0; k < kc; k++) { const y = cLo + (cHi - cLo) * (k + 0.5) / kc; slots.push({ side: 'L', a: y }, { side: 'R', a: y }); }
+          }
+          const m = slots.length;
+          if (m < n) return { overflow: true };
+          for (const q of slots) {
+            const cx = q.side === 'L' ? Fr.x0 : q.side === 'R' ? Fr.x1 : q.a, cy = q.side === 'T' ? Fr.y0 : q.side === 'B' ? Fr.y1 : q.a;
+            const R = { x0: cx - maxHW, x1: cx + maxHW, y0: cy - maxHH, y1: cy + maxHH };
+            q.ban = banned.some((b2) => ov(R, b2, 2));
+            q.maybeOn = boxBad(R); // 一番大きい記号でもモデル・寸法にかからなければ、どの記号もかからない
+          }
+          // 画面の上が狭く四角形がモデル側へ押し込まれたときなど、記号がモデル・寸法にかかる置き場所は使わない
+          const cost = items.map((it) => slots.map((q) => { const C = gridAlign(it, q.side, q.a, Fr); return Math.hypot(C.x - it.O.x, C.y - it.O.y) + (q.ban ? 1e6 : 0) + (q.maybeOn && boxBad(rectGB(it, C)) ? 1e5 : 0); }));
+          let as = null;
+          try { as = hungarianAssign(cost, n, m); } catch (e) { as = null; }
+          if (!as) return null;
+          const sides = new Array(n), along = new Array(n);
+          for (const sd of ['T', 'B', 'L', 'R']) {
+            const row = sd === 'T' || sd === 'B';
+            const list = [];
+            for (let i = 0; i < n; i++) if (slots[as[i]].side === sd) {
+              const g = items[i].gb;
+              list.push({ i, t: slots[as[i]].a, em: row ? -g.x0 : -g.y0, ep: row ? g.x1 : g.y1 });
+            }
+            list.sort((a2, b2) => a2.t - b2.t || a2.i - b2.i);
+            const pos = row ? legalize(list, rLo, rHi) : legalize(list, cLo, cHi);
+            if (!pos) return { overflow: true };
+            list.forEach((e, k) => { sides[e.i] = sd; along[e.i] = pos[k]; });
+          }
+          const Cs = items.map((it, i) => gridAlign(it, sides[i], along[i], Fr));
+          const Rs = items.map((it, i) => rectGB(it, Cs[i]));
+          const Ss = items.map((it, i) => startAt(it, Cs[i]));
+          let hard = 0, ovc = 0, crosses = 0, crowd = 0, tot = 0;
+          for (let i = 0; i < n; i++) {
+            if (!inView(Rs[i]) || banned.some((b2) => ov(Rs[i], b2, 2)) || boxBad(Rs[i])) hard++;
+            tot += Math.hypot(Ss[i].x - items[i].O.x, Ss[i].y - items[i].O.y);
+            for (let k = i + 1; k < n; k++) {
+              if (ov(Rs[i], Rs[k], 3)) { hard++; ovc++; }
+              if (segTouchesRect(Ss[i], items[i].O, Rs[k], 3)) ovc++;
+              if (segTouchesRect(Ss[k], items[k].O, Rs[i], 3)) ovc++;
+              if (segCrossesSeg(Ss[i], items[i].O, Ss[k], items[k].O)) crosses++;
+              const dx = Math.max(0, Math.max(Rs[i].x0 - Rs[k].x1, Rs[k].x0 - Rs[i].x1));
+              const dy = Math.max(0, Math.max(Rs[i].y0 - Rs[k].y1, Rs[k].y0 - Rs[i].y1));
+              if (dx < 8 && dy < 8) crowd++;
+            }
+          }
+          return { as, slots, Cs, sides, along, F: Fr, hard, ovc, crosses, crowd, tot, d: Math.min(pr, pc) };
+        };
+        const cands = []; let first = null, prevKey = '';
+        for (let g = 6; g <= 2000 && performance.now() - TG < 70; g += 8) {
+          const Fr = makeRect(g);
+          if (!(Fr.x1 > Fr.x0) || !(Fr.y1 > Fr.y0)) break;
+          const fk = [Fr.x0, Fr.x1, Fr.y0, Fr.y1].map(Math.round).join(',');
+          if (fk === prevKey) break; // 画面いっぱいまで広がった
+          prevKey = fk;
+          let okAny = false;
+          for (const own of ['row', 'col']) {
+            const r = tryRect(Fr, own);
+            if (r && !r.overflow && r.hard === 0) { cands.push(r); okAny = true; }
+          }
+          if (okAny && first == null) first = g;
+          if (first != null && g - first >= 32) break;
+        }
+        let bestG = null;
+        for (const r of cands) if (!bestG || r.ovc < bestG.ovc || (r.ovc === bestG.ovc && (r.crosses < bestG.crosses || (r.crosses === bestG.crosses && (r.crowd < bestG.crowd || (r.crowd === bestG.crowd && r.tot < bestG.tot)))))) bestG = r;
+        return bestG;
+      };
+      const gridRes = (F && SL && n > 0) ? gridLayout() : null;
+      if (gridRes) { F = gridRes.F; gridF = gridRes.F; }
       if (F && SL) {
         // v648: 1周では記号の大きさのままでは入りきらないとき(隣どうしが重なる間隔しか取れないとき)は、記号を縮める前に、
         // 四角形の内側にもう1周(同じ形の一回り小さい四角形)を作り、2周の上にそれぞれ等間隔で並べる(文字を読める大きさに保つため)。
@@ -22413,7 +22632,7 @@ pmi._lineFarPoint = null;
         // あいだを通るよう、半分ずらして置く
         const needD0 = Math.max(needW, needH);
         let F2 = null, nOut = n, nIn = 0;
-        if (SL.d < needD0 - 0.5) {
+        if (!gridRes && SL.d < needD0 - 0.5) {
           const ix = 2 * maxHW + GEQ, iy = 2 * maxHH + GEQ;
           const Fi = { x0: F.x0 + ix, x1: F.x1 - ix, y0: F.y0 + iy, y1: F.y1 - iy };
           if (Fi.x0 <= bx0 - maxHW - 4 && Fi.x1 >= bx1 + maxHW + 4 && Fi.y0 <= by0 - maxHH - 4 && Fi.y1 >= by1 + maxHH + 4) {
@@ -22440,23 +22659,36 @@ pmi._lineFarPoint = null;
           const Rs = items.map((it, i) => rectGB(it, Cs[i]));
           let ovc = 0;
           for (let i = 0; i < n; i++) for (let k = i + 1; k < n; k++) if (ov(Rs[i], Rs[k], 3)) ovc++;
-          if (F2) for (let i = 0; i < n; i++) { const S = startAt(items[i], Cs[i]); for (let k = 0; k < n; k++) if (k !== i && segTouchesRect(S, items[i].O, Rs[k], 2)) ovc++; }
+          // v653: 単周でも線と記号の衝突を必ず評価する。従来の F2 条件では見落としていた。
+          const Ss = items.map((it, i) => startAt(it, Cs[i]));
+          let crosses = 0, crowd = 0;
+          for (let i = 0; i < n; i++) {
+            for (let k = i + 1; k < n; k++) {
+              if (segTouchesRect(Ss[i], items[i].O, Rs[k], 3)) ovc++;
+              if (segTouchesRect(Ss[k], items[k].O, Rs[i], 3)) ovc++;
+              if (segCrossesSeg(Ss[i], items[i].O, Ss[k], items[k].O)) crosses++;
+              // 実際の文字・記号サイズと余白に基づく近接評価
+              const dx = Math.max(0, Math.max(Rs[i].x0 - Rs[k].x1, Rs[k].x0 - Rs[i].x1));
+              const dy = Math.max(0, Math.max(Rs[i].y0 - Rs[k].y1, Rs[k].y0 - Rs[i].y1));
+              if (dx < 8 && dy < 8) crowd++;
+            }
+          }
           let tot = 0; for (let i = 0; i < n; i++) tot += cost[i][as[i]];
-          return { as, slots, ovc, tot, d: dMin };
+          return { as, slots, ovc, crosses, crowd, tot, d: dMin };
         };
-        let best = null;
-        for (let k = 0; k < (F2 ? 24 : 16); k++) {
+        let best = gridRes; // v660
+        if (!best) for (let k = 0; k < (F2 ? 24 : 16); k++) {
           const r = evalPhase((k + 0.5) / (F2 ? 24 : 16));
-          if (r && (!best || r.ovc < best.ovc || (r.ovc === best.ovc && r.tot < best.tot))) best = r;
+          if (r && (!best || r.ovc < best.ovc || (r.ovc === best.ovc && (r.crosses < best.crosses || (r.crosses === best.crosses && (r.crowd < best.crowd || (r.crowd === best.crowd && r.tot < best.tot))))))) best = r;
         }
         // 画面に入りきらない(隣どうしの記号が実際に重なる)ときは、番号・記号を少し縮めて並べ直す。
         // 重なりが無く、1割大きくしても重ならないときは、元の大きさへ向けて大きくする(読める大きさをできるだけ保つ)
         if (best && !moving) {
           const viewKey = Array.from(mvp, (v) => v.toFixed(4)).join(',') + '|' + cw + 'x' + ch + '|' + n;
-          if (best.ovc > 0 && saZoom > SA_FIT_MIN + 1e-3) { window.__saFitShrunkKey = viewKey; setSaZoom(Math.max(SA_FIT_MIN, saZoom * 0.92)); saZoomRefScale = sceneScale; markRenderActive(400); return; }
+          if ((best.hard != null ? best.hard : best.ovc) > 0 && saZoom > SA_FIT_MIN + 1e-3) { /* v660: 四角形の並び(重なりなし)が見つかったときは縮めない */ window.__saFitShrunkKey = viewKey; setSaZoom(Math.max(SA_FIT_MIN, saZoom * 0.92)); saZoomRefScale = sceneScale; markRenderActive(400); return; }
           if (best.ovc === 0 && saZoom < 1 - 1e-3 && window.__saFitShrunkKey !== viewKey) { // 同じ向きで一度縮めたら、大きくし直さない(行ったり来たりを防ぐ)
             const k = Math.min(1, saZoom * 1.1) / saZoom;
-            const Cs = items.map((it, i) => best.slots[best.as[i]]);
+            const Cs = best.Cs || items.map((it, i) => best.slots[best.as[i]]);
             const Rs = items.map((it, i) => { const c = Cs[i]; return { x0: c.x + it.gb.x0 * k, x1: c.x + it.gb.x1 * k, y0: c.y + it.gb.y0 * k, y1: c.y + it.gb.y1 * k }; });
             let okGrow = Rs.every((R) => R.x0 >= left0V && R.x1 <= right0V && R.y0 >= top0V && R.y1 <= bottom0V && !banned.some((b2) => ov(R, b2, 2)));
             for (let i = 0; i < n && okGrow; i++) for (let j = i + 1; j < n; j++) if (ov(Rs[i], Rs[j], 3)) { okGrow = false; break; }
@@ -22464,24 +22696,124 @@ pmi._lineFarPoint = null;
           }
         }
         if (best) {
-          for (let i = 0; i < n; i++) { const it = items[i], q = best.slots[best.as[i]]; it.C = { x: q.x, y: q.y }; it.S = startAt(it, it.C); it.bend = null; it.kind = 'Q'; it._slot = best.as[i]; }
-          // 溶接記号は折れ点から引くので、まれに交差が残ることがある。そのときは2つの置き場所を入れ替える
-          const crossP = (A, B) => segCrossesSeg(A.S, A.O, B.S, B.O) || segCrossesSeg(B.S, B.O, A.S, A.O);
-          for (let pass = 0; pass < 30 && performance.now() - RT0 < 150; pass++) {
-            let fixed = false;
-            for (let i = 0; i < n; i++) for (let k = i + 1; k < n; k++) {
-              const A = items[i], B = items[k];
-              if (!crossP(A, B)) continue;
-              const Ca = { x: B.C.x, y: B.C.y }, Cb = { x: A.C.x, y: A.C.y };
-              const A2 = { S: startAt(A, Ca), O: A.O }, B2 = { S: startAt(B, Cb), O: B.O };
-              if (crossP(A2, B2)) continue;
-              A.C = Ca; A.S = A2.S; B.C = Cb; B.S = B2.S; fixed = true;
+          for (let i = 0; i < n; i++) {
+            const it = items[i], q = best.Cs ? best.Cs[i] : best.slots[best.as[i]];
+            it.C = { x: q.x, y: q.y }; it.S = startAt(it, it.C); it.bend = null; it.kind = 'Q'; it._slot = best.as[i];
+            it._gSide = best.sides ? best.sides[i] : null; it._gAlong = best.sides ? best.along[i] : null; // v660
+          }
+          // v651: 全体の交差・文字衝突を、交換対象に関係する組だけで差分評価する。
+          // 全組を交換のたびに再評価する O(n^4) 処理を避ける。
+          const crossP = (A, B) => segCrossesSeg(A.S, A.O, B.S, B.O);
+          const pairBad = (A, B) => {
+            const ra = rectGB(A, A.C), rb = rectGB(B, B.C);
+            return (crossP(A, B) ? 1 : 0) + (ov(ra, rb, 4) ? 1 : 0) +
+              (segTouchesRect(A.S, A.O, rb, 3) ? 1 : 0) +
+              (segTouchesRect(B.S, B.O, ra, 3) ? 1 : 0);
+          };
+          // v652: ほぼ重なる指示線も衝突として評価する。共有する引出点付近は除外。
+          const pointSegDist2 = (P, A, B) => {
+            const dx=B.x-A.x, dy=B.y-A.y, ll=dx*dx+dy*dy;
+            const t=ll>1e-9 ? Math.max(0,Math.min(1,((P.x-A.x)*dx+(P.y-A.y)*dy)/ll)) : 0;
+            const x=A.x+t*dx-P.x, y=A.y+t*dy-P.y;
+            return x*x+y*y;
+          };
+          const nearParallel = (A,B) => {
+            const ax=A.O.x-A.S.x, ay=A.O.y-A.S.y, bx=B.O.x-B.S.x, by=B.O.y-B.S.y;
+            const la=Math.hypot(ax,ay), lb=Math.hypot(bx,by);
+            if(la<45||lb<45) return false;
+            if(Math.abs(ax*by-ay*bx)/(la*lb)>0.045) return false;
+            // 両線の中央付近が近い場合のみ。単なる平行線を誤判定しない。
+            const pa={x:A.S.x+ax*0.5,y:A.S.y+ay*0.5};
+            const pb={x:B.S.x+bx*0.5,y:B.S.y+by*0.5};
+            return pointSegDist2(pa,B.S,B.O)<64 && pointSegDist2(pb,A.S,A.O)<64;
+          };
+          const pairBadOriginal = pairBad;
+          const pairPenalty = (A,B) => pairBadOriginal(A,B)*10 + (nearParallel(A,B)?3:0);
+          const lineLength = (A) => Math.hypot(A.S.x - A.O.x, A.S.y - A.O.y);
+          let bad = 0, totalLen = 0;
+          for (let i = 0; i < n; i++) {
+            totalLen += lineLength(items[i]);
+            for (let j = i + 1; j < n; j++) bad += pairPenalty(items[i], items[j]);
+          }
+          const deadline = performance.now() + 75;
+          // 各交換について O(n) の差分だけ調べ、全体の衝突が減る場合のみ採用する。
+          // 同数なら短い指示線を優先。交差を増やしてまで線を短くしない。
+          for (let pass = 0; pass < 6 && bad > 0 && performance.now() < deadline; pass++) {
+            let improved = false;
+            for (let i = 0; i < n && performance.now() < deadline; i++) {
+              for (let j = i + 1; j < n && performance.now() < deadline; j++) {
+                const A = items[i], B = items[j];
+                let before = pairPenalty(A, B);
+                for (let k = 0; k < n; k++) if (k !== i && k !== j) {
+                  before += pairPenalty(A, items[k]) + pairPenalty(B, items[k]);
+                }
+                const oldAC = A.C, oldAS = A.S, oldBC = B.C, oldBS = B.S;
+                const oldASd = A._gSide, oldAAl = A._gAlong, oldBSd = B._gSide, oldBAl = B._gAlong;
+                const oldLen = lineLength(A) + lineLength(B);
+                if (gridF && oldASd && oldBSd) { // v660: 置き場所を入れ替えても、記号のモデル側の縁を四角形の線にそろえる
+                  A._gSide = oldBSd; A._gAlong = oldBAl; B._gSide = oldASd; B._gAlong = oldAAl;
+                  A.C = gridAlign(A, A._gSide, A._gAlong, gridF); B.C = gridAlign(B, B._gSide, B._gAlong, gridF);
+                } else { A.C = oldBC; B.C = oldAC; }
+                A.S = startAt(A, A.C);
+                B.S = startAt(B, B.C);
+                const ra = rectGB(A, A.C), rb = rectGB(B, B.C);
+                const legal = inScreen(ra) && inScreen(rb) &&
+                  !banned.some(q => ov(ra, q, 2) || ov(rb, q, 2));
+                let after = Infinity;
+                if (legal) {
+                  after = pairPenalty(A, B);
+                  for (let k = 0; k < n; k++) if (k !== i && k !== j) {
+                    after += pairPenalty(A, items[k]) + pairPenalty(B, items[k]);
+                  }
+                }
+                const newLen = lineLength(A) + lineLength(B);
+                if (legal && (after < before || (after === before && newLen < oldLen - 1))) {
+                  bad += after - before;
+                  totalLen += newLen - oldLen;
+                  improved = true;
+                } else {
+                  A.C = oldAC; A.S = oldAS; B.C = oldBC; B.S = oldBS;
+                  A._gSide = oldASd; A._gAlong = oldAAl; B._gSide = oldBSd; B._gAlong = oldBAl;
+                }
+              }
             }
-            if (!fixed) break;
+            if (!improved) break;
+          }
+          // v652: 記号の実幅/実高による隣接間隔調整。等間隔スロットを初期値とし、
+          // 同じ辺の近接記号だけを必要量移動する。画面外・禁止領域・全体衝突悪化は採用しない。
+          const scoreAll = () => { let z=0; for(let a=0;a<n;a++) for(let b=a+1;b<n;b++) z+=pairPenalty(items[a],items[b]); return z; };
+          const gapPx=9;
+          const sideOf = it => {
+            if (gridF && it._gSide) return it._gSide; // v660
+            const x=it.C.x,y=it.C.y;
+            const candidates=[['T',Math.abs(y-F.y0)],['B',Math.abs(y-F.y1)],['L',Math.abs(x-F.x0)],['R',Math.abs(x-F.x1)]];
+            if(F2) candidates.push(['T2',Math.abs(y-F2.y0)],['B2',Math.abs(y-F2.y1)],['L2',Math.abs(x-F2.x0)],['R2',Math.abs(x-F2.x1)]);
+            candidates.sort((a,b)=>a[1]-b[1]); return candidates[0][1]<3?candidates[0][0]:null;
+          };
+          let baseScore=scoreAll();
+          for(let pass=0;pass<2 && performance.now()<deadline;pass++) {
+            let changed=false;
+            for(const side of ['T','B','L','R','T2','B2','L2','R2']) {
+              const horizontal=side[0]==='T'||side[0]==='B';
+              const group=items.filter(it=>sideOf(it)===side).sort((a,b)=>horizontal?a.C.x-b.C.x:a.C.y-b.C.y);
+              for(let k=1;k<group.length && performance.now()<deadline;k++) {
+                const A=group[k-1],B=group[k],ra=rectGB(A,A.C),rb=rectGB(B,B.C);
+                const need=horizontal?ra.x1+gapPx-rb.x0:ra.y1+gapPx-rb.y0;
+                if(need<=0)continue;
+                const old={...B.C};
+                if(horizontal)B.C.x+=need; else B.C.y+=need;
+                const rr=rectGB(B,B.C);
+                if(!inScreen(rr)||banned.some(q=>ov(rr,q,2))) {B.C=old;continue;}
+                B.S=startAt(B,B.C);
+                const next=scoreAll();
+                if(next<=baseScore){baseScore=next;changed=true;} else {B.C=old;B.S=startAt(B,B.C);}
+              }
+            }
+            if(!changed)break;
           }
           let cr = 0, tl = 0;
           for (let i = 0; i < n; i++) { const A = items[i]; tl += Math.hypot(A.C.x - A.O.x, A.C.y - A.O.y); for (let k = i + 1; k < n; k++) if (crossP(A, items[k])) cr++; }
-          window.__rectLayout = { n, rings: F2 ? 2 : 1, zoom: +saZoom.toFixed(2), spacing: Math.round(best.d), need: Math.round(Math.max(needW, needH)), overlaps: best.ovc, crossings: cr, avgLen: Math.round(tl / n), ms: Math.round(performance.now() - RT0) };
+          window.__rectLayout = { n, grid: !!gridRes, rings: F2 ? 2 : 1, zoom: +saZoom.toFixed(2), spacing: Math.round(best.d), need: Math.round(Math.max(needW, needH)), overlaps: best.ovc, crossings: cr, avgLen: Math.round(tl / n), ms: Math.round(performance.now() - RT0) };
           if (!moving) perimFullSinceMove = true;
           perimBendJob = null;
           perimMatchCache = { key, mv: moving, C: new Map(items.map((it) => [it.p.id, it.C])), B: new Map() };
@@ -23139,7 +23471,8 @@ pmi._lineFarPoint = null;
         }
         return run > LEADER_EXIT_MAX;
       };
-      const leaderModelBad = (it, S) => it.relaxLeader ? leaderExitBad(S, it.O) : segOnModel(S, it.O, it.keepEnd) > 0;
+      // v655: 緩和候補でも、モデルの投影領域を再侵入する線は不可。
+      const leaderModelBad = (it, S) => leaderExitBad(S, it.O) || segOnModel(S, it.O, it.keepEnd) > 0;
       // v627: 指示線が寸法線・寸法補助線に沿って重なる置き方も、最後の確認(finalLeaderGuard)で隠されるので最初から使わない
       const selfHard = (it, C, S) => { const R = rectAt(it, C); return dimRects.some((d) => ov(R, d, 1) || segTouchesRect(S, it.O, d, 1)) || leaderModelBad(it, S) || leaderRunsAlongSegs(S, it.O, dimSegs); };
       const nHard = (it, L) => { let k = selfHard(it, it.C, it.S) ? 1 : 0; for (const o of L) if (o !== it && pairHard(it, it.C, it.S, o)) k++; return k; };
@@ -23507,12 +23840,15 @@ pmi._lineFarPoint = null;
                 if (others.some((e) => ov(R, e.R, 4))) continue;
                 if (dimRects.some((d) => ov(R, d, 2)) || dimTouch(R, 2)) continue;
                 if (others.some((e) => e.segs.some(([a2, b2]) => segTouchesRect(a2, b2, R, 3)))) continue;
-                if (tier < 2 && rectOnModel({ x0: R.x0 - 2, x1: R.x1 + 2, y0: R.y0 - 2, y1: R.y1 + 2 })) continue;
+                // v655: 最終救済でもモデルとの重なりを許可しない。
+                if (rectOnModel({ x0: R.x0 - 2, x1: R.x1 + 2, y0: R.y0 - 2, y1: R.y1 + 2 })) continue;
                 const S = startOf(h, C);
                 if (others.some((e) => segTouchesRect(S, h.O, e.R, 3))) continue;
                 if (banned.some((b2) => segTouchesRect(S, h.O, b2, 1))) continue;
                 if (dimRects.some((d) => segTouchesRect(S, h.O, d, 1))) continue;
-                if (tier < 1 && (others.some((e) => e.segs.some(([a2, b2]) => leaderSegsConflict(S, h.O, a2, b2))) || leaderExitBad(S, h.O))) continue;
+                // v655: 線のモデル貫通は最終候補でも禁止。線同士の衝突は従来の段階緩和。
+                if (leaderExitBad(S, h.O) || segOnModel(S, h.O, h.keepEnd || 22) > 0) continue;
+                if (tier < 1 && others.some((e) => e.segs.some(([a2, b2]) => leaderSegsConflict(S, h.O, a2, b2)))) continue;
                 h.C = C; h.S = S; h.bend = null; h.kind = 'F'; placed = true; break;
               }
             }
@@ -25373,6 +25709,9 @@ pmi._lineFarPoint = null;
     // v398: サブアセンブリを選んでPMIを絞り込んでいるときは、そのPMIをすべて出す
     if (showAllAtOnce || occShowsAllPmi()) {
       for (const pmi of pmiList) {
+        // v659: 「PMIを一斉表示」の場合のみ、溶接記号の裏面遮蔽も解除する。
+        // 通常表示やサブアセンブリ絞り込み時の裏面判定は維持する。
+        if (pmi.category === 'weld' && !showAllAtOnce) continue;
         pmi._markerOccluded = false;
         pmi._farOccluded = false;
         pmi._noteMaxHidden = false;
@@ -29229,42 +29568,120 @@ pmi._lineFarPoint = null;
     document.getElementById('folderReportBtn').hidden = false;
   }
 
-  // ファイル・フォルダのドラッグ&ドロップ(フォルダの場合は中のファイルをすべて集める)
-  async function collectDroppedFiles(dt) {
-    const items = dt.items ? Array.from(dt.items) : [];
-    // webkitGetAsEntryはdropイベントの中で同期的に呼ぶ必要がある
-    const ents = items.map((it) => (it.kind === 'file' && it.webkitGetAsEntry) ? it.webkitGetAsEntry() : null).filter(Boolean);
-    if (!ents.length) return Array.from(dt.files || []);
-    const out = [];
-    async function walk(ent) {
+  // v656: Explorer/Finder から画面のどこへドロップしても STEP/ZIP/フォルダを開く。
+  // フォルダの再帰走査は readEntries が一度に最大100件しか返さない環境にも対応。
+  async function collectDroppedFiles(entries, fallbackFiles, handles) {
+    // v658: Nested directories, including directories containing >100 entries.
+    // Keep the relative path: equal filenames in different subdirectories are distinct.
+    const out = [], errors = [], seen = new Set();
+    function add(file, path) {
+      if (!file || !file.name) return;
+      const rel = path || file.webkitRelativePath || file.name;
+      const key = rel + '\u0000' + file.size + '\u0000' + file.lastModified;
+      if (seen.has(key)) return;
+      seen.add(key);
+      try { Object.defineProperty(file, 'relativePath', {value:rel, configurable:true}); } catch (_) {}
+      out.push(file);
+    }
+    async function walkEntry(ent, prefix) {
+      if (!ent) return;
+      const path = prefix ? prefix + '/' + ent.name : ent.name;
       if (ent.isFile) {
-        out.push(await new Promise((res, rej) => ent.file(res, rej)));
+        try { add(await new Promise((ok, fail) => ent.file(ok, fail)), path); }
+        catch (err) { errors.push(path + ': ' + err); }
       } else if (ent.isDirectory) {
-        const reader = ent.createReader();
-        for (;;) {
-          const batch = await new Promise((res, rej) => reader.readEntries(res, rej));
-          if (!batch.length) break;
-          for (const e of batch) await walk(e);
-        }
+        try {
+          const reader = ent.createReader();
+          // readEntries() returns only a batch (typically <=100); exhaust it.
+          for (;;) {
+            const batch = await new Promise((ok, fail) => reader.readEntries(ok, fail));
+            if (!batch.length) break;
+            for (const child of batch) await walkEntry(child, path);
+          }
+        } catch (err) { errors.push(path + ': ' + err); }
       }
     }
-    for (const e of ents) await walk(e);
+    async function walkHandle(handle, prefix) {
+      if (!handle) return;
+      const path = prefix ? prefix + '/' + handle.name : handle.name;
+      try {
+        if (handle.kind === 'file') add(await handle.getFile(), path);
+        else if (handle.kind === 'directory') {
+          for await (const child of handle.values()) await walkHandle(child, path);
+        }
+      } catch (err) { errors.push(path + ': ' + err); }
+    }
+    // Prefer the File System Access API, if present, to preserve nested directories.
+    for (const handle of handles || []) await walkHandle(handle, '');
+    if (!out.length) for (const ent of entries) await walkEntry(ent, '');
+    // dt.files can only contain top-level files on some browsers.
+    // Do not add a top-level folder placeholder as a file.
+    for (const file of fallbackFiles) {
+      if (!file || !file.name || file.size === 0 && !/\.(?:stp|step|zip)$/i.test(file.name)) continue;
+      if (out.some(x => x.name === file.name && x.size === file.size && x.lastModified === file.lastModified)) continue;
+      add(file, file.webkitRelativePath || file.name);
+    }
+    if (errors.length) console.warn('一部のファイルを読み取れませんでした:', errors);
     return out;
   }
-  function handleDroppedFile(e) {
-    e.preventDefault();
-    if (!e.dataTransfer) return;
-    collectDroppedFiles(e.dataTransfer)
-      .then((files) => { if (files.length) openStepFiles(files); })
-      .catch((err) => { console.error(err); showLoadError('ドロップしたファイルを読み込めませんでした。'); });
+  function isExternalFileDrag(e) {
+    const dt = e.dataTransfer;
+    return !!dt && Array.from(dt.types || []).includes('Files');
   }
-  canvas.addEventListener('dragover', (e) => { e.preventDefault(); });
-  canvas.addEventListener('drop', handleDroppedFile);
-  // v89: emptyStateはz-indexがcanvasより上にあり、表示中(ファイル未選択時)
-  // はドラッグ&ドロップもこちらで受ける必要がある(canvas側だけだと、
-  // emptyStateに隠れて届かない)。
-  emptyState.addEventListener('dragover', (e) => { e.preventDefault(); });
-  emptyState.addEventListener('drop', handleDroppedFile);
+  let dragDepth = 0;
+  document.addEventListener('dragenter', (e) => {
+    if (!isExternalFileDrag(e)) return;
+    e.preventDefault();
+    dragDepth++;
+    document.documentElement.classList.add('step-file-dragging');
+  }, true);
+  document.addEventListener('dragover', (e) => {
+    if (!isExternalFileDrag(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  }, true);
+  document.addEventListener('dragleave', (e) => {
+    if (!isExternalFileDrag(e)) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (!dragDepth) document.documentElement.classList.remove('step-file-dragging');
+  }, true);
+  document.addEventListener('drop', (e) => {
+    if (!isExternalFileDrag(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepth = 0;
+    document.documentElement.classList.remove('step-file-dragging');
+    // Chromium では drop ハンドラの同期処理中に entry を取得する必要がある。
+    const dt = e.dataTransfer;
+    const fallbackFiles = Array.from(dt.files || []);
+    const items = Array.from(dt.items || []).filter(item => item.kind === 'file');
+    const entries = items.map(item => {
+      try { return typeof item.webkitGetAsEntry === 'function' ? item.webkitGetAsEntry() : null; }
+      catch (_) { return null; }
+    }).filter(Boolean);
+    // Must invoke getAsFileSystemHandle synchronously during the drop event.
+    const handles = items.map(item => {
+      try { return typeof item.getAsFileSystemHandle === 'function' ? item.getAsFileSystemHandle() : null; }
+      catch (_) { return null; }
+    }).filter(Boolean);
+    Promise.allSettled(handles).then(results =>
+      collectDroppedFiles(entries, fallbackFiles,
+        results.filter(r => r.status === 'fulfilled').map(r => r.value).filter(Boolean))
+    ).then((files) => {
+      const supported = files.filter((f) => /\.(?:stp|step|zip)$/i.test(f.name));
+      if (!supported.length) {
+        showLoadError('ドロップした中にSTEP(.stp/.step)またはZIPファイルが見つかりませんでした。');
+        return;
+      }
+      openStepFiles(supported);
+    }).catch((err) => {
+      console.error('ドラッグ＆ドロップ読み込み失敗:', err);
+      showLoadError('ドロップしたファイル・フォルダを読み込めませんでした(' + (err && err.message ? err.message : '読み取りエラー') + ')。');
+    });
+  }, true);
+  // ウィンドウ外にファイルをドロップした場合のブラウザ標準ナビゲーションも防ぐ。
+  window.addEventListener('dragover', (e) => { if (isExternalFileDrag(e)) e.preventDefault(); });
+  window.addEventListener('drop', (e) => { if (isExternalFileDrag(e)) e.preventDefault(); });
 
   // v442: 「URLをコピー」ボタンは不要との要望で廃止。
 
